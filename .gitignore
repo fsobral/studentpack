@@ -1,0 +1,10 @@
+*~
+*.o
+*.mod
+studentpack
+
+# Arquivos de saida
+solution.*
+initpoint.txt
+*.tex
+*.out
