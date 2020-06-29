@@ -1,6 +1,7 @@
 *~
 *.o
 *.mod
+.silent
 studentpack
 
 # Arquivos de saida

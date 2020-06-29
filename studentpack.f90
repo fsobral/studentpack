@@ -193,13 +193,9 @@ program studentpack
      call RANDOM_SEED(PUT=seed)
   
      call RANDOM_NUMBER(x)
-     open(unit=10,file='initpoint.txt')
-     do i = 1, nite
-        read(10,*) x(2*i-1),x(2*i)
-        ! x(i) = l(i) + x(i) * (u(i) - l(i))
+     do i = 1, n
+        x(i) = l(i) + x(i) * (u(i) - l(i))
      end do
-     read(10,*)x(n)
-     close(10)
   
      call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc, &
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,jcnnzmax, &
@@ -244,14 +240,6 @@ program studentpack
      write(*,8020) ntrial,maxmindist(1),vover,x(n),valoc
   
   end do
-
-  nmem = 1
-  open(unit=10,file='initpoint.txt')
-  do i = 1, nite
-     read(10,*) xb(2*i-1,1),xb(2*i,1)
-  end do
-  read(10,*)xb(n,1)
-  close(10)
 
   if ( nmem .eq. 0 ) then
      call tojson(n,nmem,xb,nite,W,H,JSONSOL,.false.)
