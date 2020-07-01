@@ -125,9 +125,10 @@ program studentpack
      stop
   end if
 
+  ! We assume that the right part of the room  is NOT a wall
   do i = 1,nite
      l(2 * i - 1) = cW / 2.0D0
-     u(2 * i - 1) = W - cW / 2.0D0
+     u(2 * i - 1) = W
      l(2 * i)     = cH / 2.0D0
      u(2 * i)     = H - cH / 2.0D0
   end do
@@ -454,9 +455,10 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
      stop
   end if
 
+  ! We assume that the right part of the room IS NOT a wall
   do i = 1,nite
      l(2 * i - 1) = cW / 2.0D0
-     u(2 * i - 1) = W - cW / 2.0D0
+     u(2 * i - 1) = W
      l(2 * i)     = cH / 2.0D0
      u(2 * i)     = H - cH / 2.0D0
   end do
