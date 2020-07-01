@@ -125,9 +125,10 @@ program studentpack
      stop
   end if
 
+  ! We assume that the right part of the room  is NOT a wall
   do i = 1,nite
      l(2 * i - 1) = cW / 2.0D0
-     u(2 * i - 1) = W - cW / 2.0D0
+     u(2 * i - 1) = W
      l(2 * i)     = cH / 2.0D0
      u(2 * i)     = H - cH / 2.0D0
   end do
@@ -454,9 +455,10 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
      stop
   end if
 
+  ! We assume that the right part of the room IS NOT a wall
   do i = 1,nite
      l(2 * i - 1) = cW / 2.0D0
-     u(2 * i - 1) = W - cW / 2.0D0
+     u(2 * i - 1) = W
      l(2 * i)     = cH / 2.0D0
      u(2 * i)     = H - cH / 2.0D0
   end do
@@ -726,11 +728,15 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
      radius = minover(n,x(1:n,j)) / 2.0D0
   
      ! SCALING
-     scale = min(20.0D0 / H, 10.0D0 / W)
+     scale = min(20.0D0 / (H + 2.0D0) * radius, &
+                 10.0D0 / (W + 2.0D0 * radius))
      write(10,10) 2.0D0*radius,nite,scale,scale
 
      ! CLASSROOM
      write(10,25) W,H
+     ! PROFESSOR
+     write(10,26) W+1.0D0,W+5.0,H
+
 
      ! CIRCULAR ITEMS
      do i = 1,nite
@@ -754,6 +760,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
   ! NON-EXECUTABLE STATEMENTS
 
 01 format('\documentclass{article}',/,'\usepackage{tikz}',/, &
+          '\usepackage[top=1cm,bottom=1cm,left=1cm,right=1cm]{geometry}',/, &
           '\begin{document}',/)
 10 format('\begin{flushleft} \LARGE Minimum distance: ',&
         F20.10,'\\ Number of chairs: ',I5,'\end{flushleft}',/,&
@@ -767,6 +774,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
         '\filldraw[fill=red!40!white, fill opacity=0.2, draw=black] (', &
         F20.10,',',F20.10,') circle (',F20.10,'cm);')
 25 format('\draw (0,0) rectangle (',F20.10,',',F20.10,');')
+26 format('\draw[draw=red] (',F20.10,',0.0) rectangle (',F20.10,',',F20.10,');')
 30 format('\end{tikzpicture}')
 31 format('\end{document}') 
 
