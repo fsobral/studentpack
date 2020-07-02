@@ -520,7 +520,7 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
      call RANDOM_SEED(PUT=seed)
 
      call RANDOM_NUMBER(x)
-     do i = 1, nite
+     do i = 1, n
         x(i) = l(i) + x(i) * (u(i) - l(i))
      end do
 
@@ -840,7 +840,7 @@ subroutine tojson(n,nmem,x,nite,W,H,solfile,foundsol)
 20 format('                       [',F20.10,',',F20.10,'],')
 21 format('                       [',F20.10,',',F20.10,']')
 23 format('                     ]},')
-24 format('                     ]}',/,'}')
+24 format('                     ]}',/,']}')
 22 format('{',/,'   "found_solution": false',/,'}')
 
 end subroutine tojson
