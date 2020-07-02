@@ -717,7 +717,14 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
   integer :: i,j
   real(kind=8) :: scale,minover,radius
 
-  open(unit=10,file=solfile)
+  ! MODIFICADO PARA SAIDA TEX COM PID
+  character(len=15) :: fmt
+  character(len=15) :: file_name
+  fmt = '(I8.8)'
+  write(file_name, fmt) getpid()
+  file_name=trim(file_name)//'.tex'
+  open(unit=10,file=file_name)
+  ! MODIFICADO PARA SAIDA TEX COM PID
 
   write(10,01)
 
@@ -801,7 +808,14 @@ subroutine tojson(n,nmem,x,nite,W,H,solfile,foundsol)
   ! LOCAL SCALARS
   integer :: i,j
 
-  open(unit=10,file=solfile)
+  ! MODIFICADO PARA SAIDA JSON COM PID
+  character(len=15) :: fmt
+  character(len=15) :: file_name
+  fmt = '(I8.8)'
+  write(file_name, fmt) getpid()
+  file_name=trim(file_name)//'.json'
+  open(unit=10,file=file_name)
+  ! MODIFICADO PARA SAIDA JSON COM PID
 
   if ( .not. foundsol ) then
      write(10,22)
