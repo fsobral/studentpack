@@ -520,7 +520,7 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
      call RANDOM_SEED(PUT=seed)
 
      call RANDOM_NUMBER(x)
-     do i = 1, nite
+     do i = 1, n
         x(i) = l(i) + x(i) * (u(i) - l(i))
      end do
 
