@@ -1954,7 +1954,7 @@ subroutine generate_x(x, n, W, H, A)
 			   x(i+2) = x(i+2) + (dist * SQRT(3.0)/2.0)
 			   x(i+1) = dist / 2.0 * (1.0 - MOD(camada,2.0))
 			   if (camadadupla == 1) then
-					x(i+2) = dist / 2
+					x(i+2) = dist
 					x(i+1) = 0
 					camadadupla = 0
 					camada = 1
