@@ -1,6 +1,6 @@
 program testes
   use packmod
-	implicit none
+  implicit none
 
   character(len=15) :: LTEXSOL = 'solution.tex', &
                        JSONSOL = 'solution.json'
@@ -9,7 +9,7 @@ program testes
 	real(kind=8) :: W, H, t, qnt
 	real(kind=8), pointer :: x(:), xp(:), xb(:,:)
 	
-	nregw = CEILING(W / MINDIST)
+  nregw = CEILING(W / MINDIST)
   nregh = CEILING(H / MINDIST)
 
   allocate(start(0:nregw+1,0:nregh+1), stat=status)
@@ -35,7 +35,7 @@ program testes
 
 	call generate_x(x, n, W, H, nite)
 
-	write(*,*) 'Coordenadas da solucao da heuristica'
+	write(*,*) 'Solution'
 	write(*,*)  x
 	
 	
