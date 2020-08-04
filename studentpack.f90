@@ -1753,8 +1753,6 @@ subroutine generate_x(x, n, W, H, A)
 	P = W
 	L = H
 
-	PRINT *, 'Entrou na subrotina'
-
 	!***adicionei***
 	raz = P/L
 	m1 = NINT(SQRT(A*raz))
@@ -2137,13 +2135,15 @@ subroutine rowlayout(W,H)
   allocate(x(n),xp(n),xb(n,MAXMEM))
 
   call generate_x(x, n, W, H, nite)
-
-  write(*,*) 'Solution'
-  write(*,*)  x
-	
-  xb(:,1) = x(:)
-		
-  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL,2)
-  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
+  
+  if (x(n) .lt. MINDIST) then
+  	  write(*,*) 'No solution !'
+  else
+	  write(*,*) 'Solution'
+	  write(*,*)  x
+	  xb(:,1) = x(:)
+	  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL,2)
+	  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
+  end if
 
 end subroutine rowlayout 
