@@ -20,10 +20,30 @@ program studentpack
   logical               :: coded(11)
   logical,      pointer :: equatn(:),linear(:)
   real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),maxmindist(:)
+  real(kind=8), allocatable :: tmpx(:)
   integer     , pointer :: seed(:),btrial(:)
 
+  interface
+     subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
+       implicit none
+       ! SCALAR ARGUMENTS
+       integer, intent(in) :: ntrials,ptype,ssize
+       real(kind=8), intent(in) :: H,MINDIST,W
+       !
+       ! ARRAY ARGUMENTS
+       real(kind=8), allocatable, intent(inout) :: tmpx(:)
+       integer, intent(inout) :: seed(ssize)
+       !
+       ! LOCAL SCALARS
+       logical      :: checkder
+       integer      :: allocerr,hnnzmax,inform,jcnnzmax,m,n,nvparam
+       real(kind=8) :: cnorm,efacc,efstain,eoacc,eostain,epsfeas,epsopt, &
+            f,nlpsupn,snorm
+     end subroutine findgnite
+  end interface
+  
   ! LOCAL SCALARS
-  integer :: i,j,ntrial,ntrials,ptype,subptype,status,ssize,nmem
+  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem
   real(kind=8) :: H,vover,valoc,W
 
   ! FUNCTIONS
@@ -71,23 +91,12 @@ program studentpack
 6000  write(*,*) 'Problem type: 1- Max radius 2- Max chairs'
   read(*,*) ptype
 
-  if ( ptype .ne. 1 .and. ptype .ne. 2 ) goto 6000
+  if ( ptype .ne. 1 .and. ptype .ne. 2 .and. &
+       ptype .ne. 3 .and. ptype .ne. 4 ) goto 6000     
 
-  if ( ptype .eq. 1) then
-  	 6001  write(*,*) 'Desired layout: 1- Free 2- Rows '
-  	 read(*,*) subptype
-  	 if ( subptype .ne. 1 .and. subptype .ne. 2 ) goto 6001
+  if ( ptype .eq. 1 .or. ptype .eq. 3 ) then
      write(*,*) 'Enter the number of chairs: '
      read(*,*) nite
-	 
-     if ( subptype .eq. 2) then
-     
-     	 call rowlayout(W,H)
-     	 stop
-     
-     end if
-     
-     
   end if
   
   ! INITIALIZE REGIONS
@@ -111,8 +120,8 @@ program studentpack
 
   ! If problem type is 2, try to find the maximum number of chairs,
   ! respecting the minimum distance.
-  if ( ptype .eq. 2 ) then
-     call findgnite(W,H,ntrials,ssize,seed,MINDIST)
+  if ( ptype .eq. 2 .or. ptype .eq. 4 ) then
+     call findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
   end if
 
   ! Finish allocating the structure of regions
@@ -137,6 +146,29 @@ program studentpack
      stop
   end if
 
+  ! Rows
+
+  if ( ptype .eq. 4 ) then
+     xb(1:n, 1) = tmpx
+     nmem = 1
+
+     ! We need to deallocate tmpx that was used for findgnite with
+     ! ptype = 4.
+     deallocate(tmpx,stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Deallocation error in main program.'
+        stop
+     end if
+     
+     goto 6001
+  end if
+  
+  if ( ptype .eq. 3 ) then
+     call generate_x(xb(1:n,1), n, W, H, cH, cW, nite)
+     nmem = 1
+     goto 6001
+  end if
+  
   ! We assume that the right part of the room  is NOT a wall
   do i = 1,nite
      l(2 * i - 1) = cW / 2.0D0
@@ -220,6 +252,9 @@ program studentpack
      vover = minover(n,x)
      valoc = maxaloc(n,x,l,u)
 
+     ! Sugestao do Felipe
+     x(n) = vover
+     
      if ( vover .ge. MINDIST .and. valoc .le. ERR) then
         call packsort(n,x,nite,ndim)
         do i = 1,nmem
@@ -311,18 +346,29 @@ program studentpack
      vover = minover(n,xb(1:n,j))
      valoc = maxaloc(n,xb(1:n,j),l,u)
 
+     ! Sugestao do Felipe
+     xb(n,j) = vover
+     
      write(*,8020) btrial(j),maxmindist(j),vover,xb(n,j),valoc
 
   end do
 
-  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL,subptype)
+  ! Free Algencan structure
+  deallocate(lambda,equatn,linear,stat=allocerr)
+  if ( allocerr .ne. 0 ) then
+     write(*,*) 'Deallocation error in main program'
+     stop
+  end if
+
+6001 continue
+  
+  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
 
   call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
 
   ! Free structures
   
-  deallocate(x,l,u,xb,maxmindist,btrial,lambda, &
-             equatn,linear,stat=allocerr)
+  deallocate(x,l,u,xb,maxmindist,btrial, stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Deallocation error in main program'
      stop
@@ -403,7 +449,7 @@ end subroutine packsort
 !     ******************************************************
 !     ******************************************************
 
-subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
+subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
 
   ! This subroutine find the greatest value of the number of items
   ! that can be packed inside the given region. The value 'nite' is
@@ -414,10 +460,11 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
   implicit none
 
   ! SCALAR ARGUMENTS
-  integer, intent(in) :: ntrials,ssize
+  integer, intent(in) :: ntrials,ptype,ssize
   real(kind=8), intent(in) :: H,MINDIST,W
 
   ! ARRAY ARGUMENTS
+  real(kind=8), allocatable, intent(inout) :: tmpx(:)
   integer, intent(inout) :: seed(ssize)
   
   ! LOCAL SCALARS
@@ -461,9 +508,54 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
 
   ! Set lower bounds, upper bounds, and initial guess
 
-  allocate(x(n),l(n),u(n),stat=allocerr)
+  allocate(x(n),stat=allocerr)
   if ( allocerr .ne. 0 ) then
-     write(*,*) 'Allocation error in main program'
+     write(*,*) 'Allocation error in subroutine findgnite.'
+     stop
+  end if
+
+  ! Rows
+  if ( ptype .eq. 4 ) then
+
+     call generate_x(x, n, W, H, cH, cW, nite)
+
+     if ( x(n) .lt. MINDIST ) then
+
+        write(*,9050) nite, 0
+        unite = nite
+        
+     else
+
+        write(*,9051) nite,0,0.0D0,0.0D0
+        lnite = nite
+
+        ! Save successful solution
+        if ( ALLOCATED(tmpx) ) then
+           deallocate(tmpx,stat=allocerr)
+           if ( allocerr .ne. 0 ) then
+              write(*,*) 'Deallocation error in subroutine findgnite.'
+              stop
+           end if
+        end if
+        allocate(tmpx(n),stat=allocerr)
+        if ( allocerr .ne. 0 ) then
+           write(*,*) 'Allocation error in subroutine findgnite.'
+           stop
+        end if
+        tmpx = x
+        
+     end if
+
+     goto 8100
+  end if
+  
+  ! Constraints
+
+  m = 0
+
+  allocate(l(n),u(n),equatn(m),linear(m),lambda(m),stat=allocerr)
+  if ( allocerr .ne. 0 ) then
+     write(*,*) 'Allocation error in subroutine findgnite.'
      stop
   end if
 
@@ -477,16 +569,6 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
 
   l(n) = max(MINDIST, sqrt(cW **2 + cH ** 2) / 2.0D0)
   u(n) = 1.5D0 * sqrt(W **2 + H ** 2)
-
-  ! Constraints
-
-  m = 0
-
-  allocate(equatn(m),linear(m),lambda(m),stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Allocation error in main program'
-     stop
-  end if
 
   ! Coded subroutines
 
@@ -550,9 +632,9 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
 
   end do
 
-  deallocate(x,l,u,lambda,equatn,linear,stat=allocerr)
+  deallocate(l,u,lambda,equatn,linear,stat=allocerr)
   if ( allocerr .ne. 0 ) then
-     write(*,*) 'Deallocation error in main program'
+     write(*,*) 'Deallocation error in subroutine findgnite.'
      stop
   end if
 
@@ -568,7 +650,11 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
 
   end if
 
-  deallocate(diagb,next)
+8100 deallocate(x,diagb,next,stat=allocerr)
+  if ( allocerr .ne. 0 ) then
+     write(*,*) 'Deallocation error in subroutine findgnite.'
+     stop
+  end if
   
   goto 8000
 
@@ -708,7 +794,7 @@ end function maxaloc
 !     ******************************************************
 !     ******************************************************
 
-subroutine drawsol(nite,W,H,n,nmem,x,solfile,subptype)
+subroutine drawsol(nite,W,H,n,nmem,x,solfile)
 
   use packmod, only: nfix,fcoord,frad
 
@@ -718,7 +804,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile,subptype)
   !     graphical representation of the problem.
 
   !     SCALAR ARGUMENTS
-  integer, intent(in)      :: n,nite,nmem,subptype
+  integer, intent(in)      :: n,nite,nmem
   real(kind=8), intent(in) :: W,H
 
   !     ARRAY ARGUMENTS
@@ -727,7 +813,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile,subptype)
 
   !     LOCAL SCALARS
   integer :: i,j
-  real(kind=8) :: scale,minover,radius
+  real(kind=8) :: scale,radius
 
   open(unit=10,file=solfile)
 
@@ -737,11 +823,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile,subptype)
 
      if ( j .gt. 1 ) write(10,12)
 
-     if (subptype .eq. 2) then
-	 	radius = x(n,j) / 2.0D0
-	 else
-	 	radius = minover(n,x(1:n,j)) / 2.0D0
-	 end if
+     radius = x(n,j) / 2.0D0
 	 
      ! SCALING
      scale = min(20.0D0 / (H + 2.0D0) * radius, &
@@ -1723,427 +1805,392 @@ subroutine region(nregw,nregh,iterad,x,y,i,j)
 
 end subroutine region
 
-subroutine generate_x(x, n, W, H, A)
-	implicit none
-	integer :: i, j, caso  , lin(6), cox, coy, cb
-	! n is the number of variables
-	! A is the number of chairs
-	integer, intent(in) :: n, A
-	!x is the array with the points we will generate and give back
-	real(kind=8), intent(inout) :: x(n)
-	! P and L are the dimensions of the room
-	real(kind=8), intent(in):: W, H
-
-	real(kind=8) :: Tz(A,2), Ts(A,2), Td(A,2), Pdist_t(A,6)
-        real(kind=8) :: ajuste_t(A,6), provaL, P, L, limbase(A,6)
-	real(kind=8) :: dist_t(1,6), dist, aux, Z(A,2), S(A,2), D(A,2)
-        real(kind=8) :: camada, camadadupla, v(6), so_t(2)
-        real(kind=8) :: pit2(4), pit1(4), coo(A,2), cod(A,2)
-
-	!***adicionei***
-	real(kind=8) :: raz,t
-	integer :: m1, m2, alfa, omega,  linha1, ultimalinha
-	!***adicionei***
-
-	!***adicionei***
-	real(kind=8) :: q, d_v
-	integer :: caso_v
-	!***adicionei***
+subroutine generate_x(x, n, W, H, ch, cw, A)
+  implicit none
+  integer :: i, j, caso  , lin(6), cox, coy, cb
+  ! n is the number of variables
+  ! A is the number of chairs
+  integer, intent(in) :: n, A
+  !x is the array with the points we will generate and give back
+  real(kind=8), intent(inout) :: x(n)
+  ! P and L are the dimensions of the room
+  real(kind=8), intent(in):: W, H, ch, cw
+
+  real(kind=8) :: Tz(A,2), Ts(A,2), Td(A,2), Pdist_t(A,6)
+  real(kind=8) :: ajuste_t(A,6), provaL, P, L, limbase(A,6)
+  real(kind=8) :: dist_t(1,6), dist, aux, Z(A,2), S(A,2), D(A,2)
+  real(kind=8) :: camada, camadadupla, v(6), so_t(2)
+  real(kind=8) :: pit2(4), pit1(4), coo(A,2), cod(A,2)
 
-	P = W
-	L = H
+  !***adicionei***
+  real(kind=8) :: raz
+  integer :: m1, m2, alfa, omega,  linha1
+  !***adicionei***
+
+  !***adicionei***
+  real(kind=8) :: d_v
+  integer :: caso_v
+  !***adicionei***
 
-	!***adicionei***
-	raz = P/L
-	m1 = NINT(SQRT(A*raz))
-	m2 = NINT(SQRT(A/raz))
-	alfa = MIN (m1, m2) - 2
-	omega = MAX (m1, m2) + 2
-
-	if (alfa .lt. 1) then
-		alfa = 1
-	end if
+  P = W - cw / 2.0D0
+  L = H - ch
 
-        if (omega .gt. A) then
-			omega = A
-	end if
+  !***adicionei***
+  raz = P/L
+  m1 = NINT(SQRT(A*raz))
+  m2 = NINT(SQRT(A/raz))
+  alfa = MIN (m1, m2) - 2
+  omega = MAX (m1, m2) + 2
 
-	!=========  Zig-zag pattern   =========
-	! O_O_O
-	! _O_O_O
-	! O_O_O
+  if (alfa .lt. 1) then
+     alfa = 1
+  end if
 
-	Z(1,1) = A
-	Z(1,2) = 1
+  if (omega .gt. A) then
+     omega = A
+  end if
 
-	do i=alfa,omega
-		Z(i,1) = CEILING(A/real(i,8))
- 		Z(i,2) = i
-  	end do
+  !=========  Zig-zag pattern   =========
+  ! O_O_O
+  ! _O_O_O
+  ! O_O_O
 
+  Z(1,1) = A
+  Z(1,2) = 1
 
+  do i=alfa,omega
+     Z(i,1) = CEILING(A/real(i,8))
+     Z(i,2) = i
+  end do
 
-	! Zig-zag sizes (Tz):
-
-
-	! With more than 6 students, they will be distibuted in vertices
-	!of equilateral triangles. The array "Tz" stores the bases
-	!and the heights of them in function of the side "l".
 
-	!The first column of Tz has the sum of the bases of the fist line.
-	!The second one has the sum of the heights.
 
-	do i=alfa,omega
-		! With n triangles, we have n - 1 bases and the sum of half a
-		! base of the last one of the second line.
-		! We also have n-1 heights
-		Tz(i,1) = Z(i,1) - 0.5
-		Tz(i,2) = (Z(i,2)-1.0)*SQRT(3.0)/2.0
-	end do
+  ! Zig-zag sizes (Tz):
 
-	Tz(1,2) = 0.000001; !considering the width of a single line
 
+  ! With more than 6 students, they will be distibuted in vertices
+  !of equilateral triangles. The array "Tz" stores the bases
+  !and the heights of them in function of the side "l".
 
-        
-        !read *, tt
+  !The first column of Tz has the sum of the bases of the fist line.
+  !The second one has the sum of the heights.
 
-	! Bases in P
-	do i=alfa,omega
-		Pdist_t(i,1) = P / Tz(i, 1)
-		provaL = Pdist_t(i,1) * Tz(i,2)
-		if (provaL .gt. L) then
-			ajuste_t(i,1) = provaL
-			Pdist_t(i,1) = L / Tz(i,2)
-		end if
- 		limbase(i,1)= Pdist_t(i,1)*Tz(i,1) !***adicionei***
-	end do
+  do i=alfa,omega
+     ! With n triangles, we have n - 1 bases and the sum of half a
+     ! base of the last one of the second line.
+     ! We also have n-1 heights
+     Tz(i,1) = Z(i,1) - 0.5
+     Tz(i,2) = (Z(i,2)-1.0)*SQRT(3.0)/2.0
+  end do
 
-	! Heights in P
-	do i=alfa,omega
-		Pdist_t(i,2) = P / Tz(i,2)
-		provaL = Pdist_t(i,2) * Tz(i,1)
-		if (provaL .gt. L) then
-			ajuste_t(i,2) = provaL
-			Pdist_t(i,2) = L / Tz(i,1)
-		end if
-		limbase(i,2)= Pdist_t(i,2)*Tz(i,1) !***adicionei***
-	end do
+  Tz(1,2) = 0.000001; !considering the width of a single line
 
 
 
-	!=========  Sandwich pattern   =========
-	! O_O_O
-	! _O_O_
-	! O_O_O
+  !read *, tt
 
+  ! Bases in P
+  do i=alfa,omega
+     Pdist_t(i,1) = P / Tz(i, 1)
+     provaL = Pdist_t(i,1) * Tz(i,2)
+     if (provaL .gt. L) then
+        ajuste_t(i,1) = provaL
+        Pdist_t(i,1) = L / Tz(i,2)
+     end if
+     limbase(i,1)= Pdist_t(i,1)*Tz(i,1) !***adicionei***
+  end do
 
+  ! Heights in P
+  do i=alfa,omega
+     Pdist_t(i,2) = P / Tz(i,2)
+     provaL = Pdist_t(i,2) * Tz(i,1)
+     if (provaL .gt. L) then
+        ajuste_t(i,2) = provaL
+        Pdist_t(i,2) = L / Tz(i,1)
+     end if
+     limbase(i,2)= Pdist_t(i,2)*Tz(i,1) !***adicionei***
+  end do
 
-	S(1,1) = A
-	S(1,2) = 1
 
-	do i=alfa,omega
-	S(i,1) = CEILING((A - CEILING(real(i)/2.0))/ real(i)) + 1.0
-	S(i, 2) = i
-	end do
 
+  !=========  Sandwich pattern   =========
+  ! O_O_O
+  ! _O_O_
+  ! O_O_O
 
 
-	! Sandwich sizes:
-	! First column has the sum of the bases of the first line
-	! Second column has the sum of the heights
 
-	do i=alfa,omega
-		! With n triangles, we have n-1 bases and the sum of half a base
-		!of the last one of the second line.
-		! We also have n-1 heights
-		Ts(i,1) = S(i,1) - 1.0
-		Ts(i,2) = (S(i,2) - 1.0)*SQRT(3.0)/2.0
-	end do
+  S(1,1) = A
+  S(1,2) = 1
 
-	Ts(1,2) = 0.000001 ! Considering the width of a single row
+  do i=alfa,omega
+     S(i,1) = CEILING((A - CEILING(real(i)/2.0))/ real(i)) + 1.0
+     S(i, 2) = i
+  end do
 
 
 
+  ! Sandwich sizes:
+  ! First column has the sum of the bases of the first line
+  ! Second column has the sum of the heights
 
+  do i=alfa,omega
+     ! With n triangles, we have n-1 bases and the sum of half a base
+     !of the last one of the second line.
+     ! We also have n-1 heights
+     Ts(i,1) = S(i,1) - 1.0
+     Ts(i,2) = (S(i,2) - 1.0)*SQRT(3.0)/2.0
+  end do
 
-	!Bases in P
-	do i=alfa,omega
-		Pdist_t(i,3) = P/Ts(i,1)
-		provaL = Pdist_t(i,3) * Ts(i,2)
-		if (provaL .gt. L) then
-			ajuste_t(i,3) = provaL
-			Pdist_t(i,3) = L / Ts(i,2)
-		end if
-		limbase(i,3)= Pdist_t(i,3)*Ts(i,1) !***adicionei***
-	end do
+  Ts(1,2) = 0.000001 ! Considering the width of a single row
 
-	!Heights in P
-	do i=alfa,omega
-		Pdist_t(i,4) = P/Ts(i,2)
-		provaL = Pdist_t(i,4)*Ts(i,1)
-		if (provaL .gt. L) then
-			ajuste_t(i,4) = provaL
-			Pdist_t(i,4) = L/Ts(i,1)
-		end if
-		limbase(i,4)= Pdist_t(i,4)*Ts(i,1) !***adicionei***
-	end do
 
 
 
-	!=========  Double Layer pattern   =========
-	! O_O_O
-	! O_O_O
-	! _O_O_
-	! O_O_O
 
-	camadadupla = 0
+  !Bases in P
+  do i=alfa,omega
+     Pdist_t(i,3) = P/Ts(i,1)
+     provaL = Pdist_t(i,3) * Ts(i,2)
+     if (provaL .gt. L) then
+        ajuste_t(i,3) = provaL
+        Pdist_t(i,3) = L / Ts(i,2)
+     end if
+     limbase(i,3)= Pdist_t(i,3)*Ts(i,1) !***adicionei***
+  end do
 
-	D(1,1)=A
-	D(1,2)=1
+  !Heights in P
+  do i=alfa,omega
+     Pdist_t(i,4) = P/Ts(i,2)
+     provaL = Pdist_t(i,4)*Ts(i,1)
+     if (provaL .gt. L) then
+        ajuste_t(i,4) = provaL
+        Pdist_t(i,4) = L/Ts(i,1)
+     end if
+     limbase(i,4)= Pdist_t(i,4)*Ts(i,1) !***adicionei***
+  end do
 
-	do i=alfa,omega
-	D(i,1)= CEILING(real((A - 1 + CEILING(real(i)/2.0))/real(i)))
-	D(i,2)= i
-	end do
 
 
-	! Double layer sizes:
-	! First row has the sum of the bases of the first line
-	! Second row has the sum of the heights
+  !=========  Double Layer pattern   =========
+  ! O_O_O
+  ! O_O_O
+  ! _O_O_
+  ! O_O_O
 
-	do i=alfa,omega
-		! With n triangles, we have n-1 bases and the sum of half a base
-		!of the last triangle of the second line.
-		Td(i,1)= D(i,1)-1
-		! Here we have to consider the double layer before we think about the
-		!triangles.
-		Td(i,2)= (S(i,2) - 2.0)*SQRT(3.0)/2.0 + 1.0
-	end do
+  camadadupla = 0
 
-	Td(1,2) = 0.000001 ! Considerando a altura de uma única fileira
+  D(1,1)=A
+  D(1,2)=1
 
+  do i=alfa,omega
+     D(i,1)= CEILING(real((A - 1 + CEILING(real(i)/2.0))/real(i)))
+     D(i,2)= i
+  end do
 
 
-	!Bases in P
-	do i=alfa,omega
-		Pdist_t(i,5)= P/Td(i,1)
-		provaL = Pdist_t(i,5) * Td(i,2)
-		if (provaL .gt. L) then
-		    ajuste_t(i,5) = provaL
-		    Pdist_t(i,5) = L / Td(i,2)
-		end if
-		limbase(i,5)= Pdist_t(i,5)*Td(i,1) !***adicionei***
-	end do
+  ! Double layer sizes:
+  ! First row has the sum of the bases of the first line
+  ! Second row has the sum of the heights
 
-	!Heights in P
-	do i=alfa,omega
-		Pdist_t(i,6)= P / Td(i,2)
-		provaL = Pdist_t(i,6) * Td(i,1)
-		if (provaL .gt. L) then
-		    ajuste_t(i,6) = provaL
-		    Pdist_t(i,6) = L / Td(i,1)
-		end if
-		limbase(i,6)= Pdist_t(i,6)*Td(i,1) !***adicionei***
-	end do
+  do i=alfa,omega
+     ! With n triangles, we have n-1 bases and the sum of half a base
+     !of the last triangle of the second line.
+     Td(i,1)= D(i,1)-1
+     ! Here we have to consider the double layer before we think about the
+     !triangles.
+     Td(i,2)= (S(i,2) - 2.0)*SQRT(3.0)/2.0 + 1.0
+  end do
 
+  Td(1,2) = 0.000001 ! Considerando a altura de uma única fileira
 
 
-	! ==================================
 
-	!indentifies the maximum distance and if the case demands to change P with L
+  !Bases in P
+  do i=alfa,omega
+     Pdist_t(i,5)= P/Td(i,1)
+     provaL = Pdist_t(i,5) * Td(i,2)
+     if (provaL .gt. L) then
+        ajuste_t(i,5) = provaL
+        Pdist_t(i,5) = L / Td(i,2)
+     end if
+     limbase(i,5)= Pdist_t(i,5)*Td(i,1) !***adicionei***
+  end do
 
-	!dist_t = MAXVAL(Pdist_t)
-	do i = 1,6
-		aux = Pdist_t(1,i)
-		lin(i) = 1
-		do j = 1,A                                      !***Pode ser de alfa até omega?
-			if(Pdist_t(j,i) > aux)then
-				aux = Pdist_t(j,i)
-				lin(i) = j                         !***adicionei
-			end if
-		end do
-		dist_t(1,i) = aux
-	end do
+  !Heights in P
+  do i=alfa,omega
+     Pdist_t(i,6)= P / Td(i,2)
+     provaL = Pdist_t(i,6) * Td(i,1)
+     if (provaL .gt. L) then
+        ajuste_t(i,6) = provaL
+        Pdist_t(i,6) = L / Td(i,1)
+     end if
+     limbase(i,6)= Pdist_t(i,6)*Td(i,1) !***adicionei***
+  end do
 
 
 
-	dist = MAXVAL(dist_t)
+  ! ==================================
 
-	!caso = MAXLOC(dist_t)
-	do i = 1,6
-		if(dist_t(1,i) == dist) then
-			caso = i
-			EXIT
-		end if
-	end do
+  !indentifies the maximum distance and if the case demands to change P with L
 
-
-
-	!***adicionei***
-
-    pit1(1) = ((dist_t(1,1)*P/limbase(lin(1),1))/2)**2
-    pit1(2) = ((dist_t(1,2)*L/limbase(lin(2),2))/2)**2
-    pit1(3) = ((dist_t(1,3)*P/limbase(lin(3),3))/2)**2
-    pit1(4) = ((dist_t(1,4)*L/limbase(lin(4),4))/2)**2
-
-
-    pit2(1) = dist_t(1,1)**2  * 0.75
-    pit2(2) = dist_t(1,2)**2  * 0.75
-    pit2(3) = dist_t(1,3)**2  * 0.75
-    pit2(4) = dist_t(1,4)**2  * 0.75
-
-
-
-   	v(1)=sqrt(pit1(1)+pit2(1))
-	v(2)=sqrt(pit1(2)+pit2(2))
-	v(3)=sqrt(pit1(3)+pit2(3))
-	v(4)=sqrt(pit1(4)+pit2(4))
-    v(5)=dist_t(1,5)
-	v(6)=dist_t(1,6)
-
-    !caso_v = MAXLOC(v)
-    !d_v = MAXVAL(v)
-    d_v = v(1)
-    caso_v = 1
-    do i = 2,6
-       if(v(i) > d_v)then
-			d_v = v(i)
-			caso_v = i
-	   end if
- 	end do
-
-  	if (d_v .gt. dist) then
-  		dist=dist_t(1,caso_v)
-   		caso=caso_v
-	end if
-
-       	!***adicionei***
-
-	!rounding the milimiters     !***Isso eu tirei pra comparar as medidas
-	!dist = FLOOR(dist*1000.0)/1000.0
-
-	!verifies if the bases were constructed over L or over P and change them if needed
-         cb=0
-	 if (MOD(real(caso),2.0) == 0) then
-		 aux = P
-		 P = L
-		 L = aux
-		 cb=1
-	 end if
-
-	 !Verifies the double layer
-	 if (caso == 5 .OR. caso == 6) then
-		 camadadupla = 1
-	 end if
-
-
-
-	 	 !==========  Exporting the coordinates  ==========
-	camada = 1.0
-
-      coo(1,1) = 0.0
-      coo(1,2) = 0.0
-
-      do i=2,A
-         coo(i,1)=coo(i-1,1)+dist;
-         coo(i,2)=coo(i-1,2);
-	 if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
-	    camada = camada + 1
-	    coo(i,2) = coo(i,2) + (dist * SQRT(3.0)/2.0)
-	    coo(i,1) = dist / 2.0 * (1.0 - MOD(camada,2.0))
-	    if (camadadupla == 1) then
-	       coo(i,2) = dist
-	       coo(i,1) = 0
-	       camadadupla = 0
-	       camada = 1
-            end if
-	end if
-  	end do
-
-    cod=coo
-
-    so_t=MAXVAL(cod, dim=1)
-
-
-    if ((P-so_t(1)) > (L-so_t(2))) then
-       if  (so_t(1) .ne. 0) then
-           do i=1,A
-              cod(i,1)= cod(i,1)*P/(so_t(1))
-           end do
-       end if
-    else
-        if  (so_t(2) .ne. 0) then
-            do i=1,A
-               cod(i,2)= cod(i,2)*L/(so_t(2))
-            end do
+  !dist_t = MAXVAL(Pdist_t)
+  do i = 1,6
+     aux = Pdist_t(1,i)
+     lin(i) = 1
+     do j = 1,A                                      !***Pode ser de alfa até omega?
+        if(Pdist_t(j,i) > aux)then
+           aux = Pdist_t(j,i)
+           lin(i) = j                         !***adicionei
         end if
-   end if
+     end do
+     dist_t(1,i) = aux
+  end do
 
-   dist=v(caso)
-     
-   cox=1
-   coy=2
-  
-   if (cb==1) then
+
+
+  dist = MAXVAL(dist_t)
+
+  !caso = MAXLOC(dist_t)
+  do i = 1,6
+     if(dist_t(1,i) == dist) then
+        caso = i
+        EXIT
+     end if
+  end do
+
+
+
+  !***adicionei***
+
+  pit1(1) = ((dist_t(1,1)*P/limbase(lin(1),1))/2)**2
+  pit1(2) = ((dist_t(1,2)*L/limbase(lin(2),2))/2)**2
+  pit1(3) = ((dist_t(1,3)*P/limbase(lin(3),3))/2)**2
+  pit1(4) = ((dist_t(1,4)*L/limbase(lin(4),4))/2)**2
+
+
+  pit2(1) = dist_t(1,1)**2  * 0.75
+  pit2(2) = dist_t(1,2)**2  * 0.75
+  pit2(3) = dist_t(1,3)**2  * 0.75
+  pit2(4) = dist_t(1,4)**2  * 0.75
+
+
+
+  v(1)=sqrt(pit1(1)+pit2(1))
+  v(2)=sqrt(pit1(2)+pit2(2))
+  v(3)=sqrt(pit1(3)+pit2(3))
+  v(4)=sqrt(pit1(4)+pit2(4))
+  v(5)=dist_t(1,5)
+  v(6)=dist_t(1,6)
+
+  !caso_v = MAXLOC(v)
+  !d_v = MAXVAL(v)
+  d_v = v(1)
+  caso_v = 1
+  do i = 2,6
+     if(v(i) > d_v)then
+        d_v = v(i)
+        caso_v = i
+     end if
+  end do
+
+  if (d_v .gt. dist) then
+     dist=dist_t(1,caso_v)
+     caso=caso_v
+  end if
+
+  !***adicionei***
+
+  !rounding the milimiters     !***Isso eu tirei pra comparar as medidas
+  !dist = FLOOR(dist*1000.0)/1000.0
+
+  !verifies if the bases were constructed over L or over P and change them if needed
+  cb=0
+  if (MOD(real(caso),2.0) == 0) then
+     aux = P
+     P = L
+     L = aux
+     cb=1
+  end if
+
+  !Verifies the double layer
+  if (caso == 5 .OR. caso == 6) then
+     camadadupla = 1
+  end if
+
+
+
+  !==========  Exporting the coordinates  ==========
+  camada = 1.0
+
+  coo(1,1) = 0.0
+  coo(1,2) = 0.0
+
+  do i=2,A
+     coo(i,1)=coo(i-1,1)+dist;
+     coo(i,2)=coo(i-1,2);
+     if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
+        camada = camada + 1
+        coo(i,2) = coo(i,2) + (dist * SQRT(3.0)/2.0)
+        coo(i,1) = dist / 2.0 * (1.0 - MOD(camada,2.0))
+        if (camadadupla == 1) then
+           coo(i,2) = dist
+           coo(i,1) = 0
+           camadadupla = 0
+           camada = 1
+        end if
+     end if
+  end do
+
+  cod=coo
+
+  so_t=MAXVAL(cod, dim=1)
+
+
+  if ((P-so_t(1)) > (L-so_t(2))) then
+     if  (so_t(1) .ne. 0) then
+        do i=1,A
+           cod(i,1)= cod(i,1)*P/(so_t(1))
+        end do
+     end if
+  else
+     if  (so_t(2) .ne. 0) then
+        do i=1,A
+           cod(i,2)= cod(i,2)*L/(so_t(2))
+        end do
+     end if
+  end if
+
+  dist=v(caso)
+
+  cox=1
+  coy=2
+
+  if (cb==1) then
      cox=2
      coy=1
-   end if
-      
-      
-    do i=1,n-1
-      linha1=(i+1)/2
-      if (MOD(real(i),2.0) == 1) then
-	      x(i)=cod(linha1,cox)
-       !   xp(i)=cop(linha1,cox)
-      else
-         x(i)=cod(linha1,coy)
-       !  xp(i)=cop(linha1,coy)
-      end if
-    end do
-  
-   !Falta converter nesse formato
-   x(n) = dist
-  ! xp(n)= dist
+  end if
 
+
+  do i=1,n-1
+     linha1=(i+1)/2
+     if (MOD(real(i),2.0) == 1) then
+        x(i)=cod(linha1,cox)
+        !   xp(i)=cop(linha1,cox)
+     else
+        x(i)=cod(linha1,coy)
+        !  xp(i)=cop(linha1,coy)
+     end if
+  end do
+
+  x(n) = dist
+
+  do i = 1, A
+
+     x(2 * i - 1) = x(2 * i - 1) + cw / 2.0D0
+     x(2 * i)     = x(2 * i)     + ch / 2.0D0
+     
+  end do
 
   return
-  end subroutine generate_x
-
-
-subroutine rowlayout(W,H)
-  use packmod
-  implicit none
-
-  character(len=15) :: LTEXSOL = 'solution.tex', &
-                       JSONSOL = 'solution.json'
-  integer           :: MAXMEM = 1, nmem = 1, n, status
-
-	real(kind=8), intent(in) :: W, H
-	real(kind=8), pointer :: x(:), xp(:), xb(:,:)
-	
-  nregw = CEILING(W / MINDIST)
-  nregh = CEILING(H / MINDIST)
-
-  allocate(start(0:nregw+1,0:nregh+1), stat=status)
-  if ( status .ne. 0 ) then
-    write(*,*) 'Allocation error'
-    stop
-  end if
-
-  n=1+nite*2
-  
-  allocate(x(n),xp(n),xb(n,MAXMEM))
-
-  call generate_x(x, n, W, H, nite)
-  
-  if (x(n) .lt. MINDIST) then
-  	  write(*,*) 'No solution !'
-  else
-	  write(*,*) 'Solution'
-	  write(*,*)  x
-	  xb(:,1) = x(:)
-	  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL,2)
-	  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
-  end if
-
-end subroutine rowlayout 
+end subroutine generate_x
