@@ -88,7 +88,7 @@ program studentpack
      read(*,*) fcoord(1,j),fcoord(2,j),frad(j)
   end do
 
-6000  write(*,*) 'Problem type: 1- Max radius 2- Max chairs'
+6000  write(*,*) 'Problem type: 1- Max radius 2- Max chairs 3- Max radius with rows 4- Max chairs with rows '
   read(*,*) ptype
 
   if ( ptype .ne. 1 .and. ptype .ne. 2 .and. &
@@ -363,8 +363,13 @@ program studentpack
 6001 continue
   
   call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
+  
+  if (xb(n,1) .lt. mindist) then
+  	  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.false.)
+  else
+  	  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
+  end if
 
-  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
 
   ! Free structures
   
