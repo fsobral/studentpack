@@ -2055,9 +2055,9 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
 
   !dist_t = MAXVAL(Pdist_t)
   do i = 1,6
-     aux = Pdist_t(1,i)
+     aux = Pdist_t(alfa,i)
      lin(i) = 1
-     do j = 1,A                                      !***Pode ser de alfa até omega?
+     do j = alfa,omega                                      !***Pode ser de alfa até omega?
         if(Pdist_t(j,i) > aux)then
            aux = Pdist_t(j,i)
            lin(i) = j                         !***adicionei
@@ -2065,8 +2065,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      end do
      dist_t(1,i) = aux
   end do
-
-
 
   dist = MAXVAL(dist_t)
 
