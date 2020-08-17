@@ -8,6 +8,7 @@ program studentpack
   character(len=15) :: LTEXSOL = 'solution.tex', &
                        JSONSOL = 'solution.json'
   integer           :: MAXMEM = 5
+  real(kind=8)      :: PERTURBATION = 0.0D-2
   
   ! LOCAL SCALARS
   logical      :: checkder
@@ -19,16 +20,16 @@ program studentpack
   character(len=80)     :: specfnm,outputfnm,vparam(10)
   logical               :: coded(11)
   logical,      pointer :: equatn(:),linear(:)
-  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),maxmindist(:)
+  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),xlin(:),maxmindist(:)
   real(kind=8), allocatable :: tmpx(:)
   integer     , pointer :: seed(:),btrial(:)
 
   interface
-     subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
+     subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
        implicit none
        ! SCALAR ARGUMENTS
        integer, intent(in) :: ntrials,ptype,ssize
-       real(kind=8), intent(in) :: H,MINDIST,W
+       real(kind=8), intent(in) :: H,MINDIST,W,perturb
        !
        ! ARRAY ARGUMENTS
        real(kind=8), allocatable, intent(inout) :: tmpx(:)
@@ -43,7 +44,7 @@ program studentpack
   end interface
   
   ! LOCAL SCALARS
-  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem
+  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem,MAXMEMOLD
   real(kind=8) :: H,vover,valoc,W
 
   ! FUNCTIONS
@@ -121,9 +122,11 @@ program studentpack
   ! If problem type is 2, try to find the maximum number of chairs,
   ! respecting the minimum distance.
   if ( ptype .eq. 2 .or. ptype .eq. 4 ) then
-     call findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
+     call findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,PERTURBATION)
   end if
 
+  !write(*,*) 'NITE', nite
+  
   ! Finish allocating the structure of regions
   
   allocate(diagb(ndim,ndim,nite),next(nite))
@@ -139,7 +142,7 @@ program studentpack
 
   ! Set lower bounds, upper bounds, and initial guess
 
-  allocate(x(n),l(n),u(n),xb(n,MAXMEM),btrial(MAXMEM), &
+  allocate(x(n),l(n),u(n),xb(n,MAXMEM),xlin(n),btrial(MAXMEM), &
            maxmindist(MAXMEM),stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Allocation error in main program'
@@ -232,16 +235,37 @@ program studentpack
   maxmindist = 0.0D0
   nmem       = 0
 
+  !Mudanca Felipe
+  ! Vamos devolver a solucao em filas como uma opcao se possivel
+  !Tem que definir MAXMEMOLD
+  MAXMEMOLD = MAXMEM
+  ! Fim Mudanca Felipe
+
+
   do ntrial = 1,ntrials
-  
-     seed = 123456789.0D0 + ntrial
-     call RANDOM_SEED(PUT=seed)
-  
-     call RANDOM_NUMBER(x)
-     do i = 1, n
-        x(i) = l(i) + x(i) * (u(i) - l(i))
-     end do
-  
+
+  !Mudanca Felipe
+  !Ponto inicial aproveitando Thiago 
+  !Tem que definir xlin  
+     if (ntrial .eq. 1) then
+     		call generate_x(xlin, n, W, H, ch, cw, nite)
+        !write(*,*) 'Entrou na perturbacao ', MAXMEM, x(n), MINDIST, nite
+        if (xlin(n) .ge. MINDIST .and. MAXMEM .gt. 1) then
+           MAXMEM = MAXMEM-1 !uma opcao eh  xlin, mesmo que pior
+        end if
+        call perturbation_x(xlin,x,n,nite,PERTURBATION) 
+	!qnt poderia estar definida dentro de perturbation_x
+	!tem que definir ela aqui se nao definir la
+     else
+			 	seed = 123456789.0D0 + ntrial
+				call RANDOM_SEED(PUT=seed)
+				call RANDOM_NUMBER(x)
+				do i = 1, n
+		    	x(i) = l(i) + x(i) * (u(i) - l(i))
+		    end do
+     end if
+    ! Fim Mudanca Felipe
+
      call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc, &
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,jcnnzmax, &
        hnnzmax,epsfeas,epsopt,efstain,eostain,efacc,eoacc,outputfnm, &
@@ -289,7 +313,7 @@ program studentpack
   
   end do
 
-  if ( nmem .eq. 0 ) then
+  if ( nmem .eq. 0 .and. MAXMEM .eq. MAXMEMOLD ) then
      call tojson(n,nmem,xb,nite,W,H,JSONSOL,.false.)
      stop
   end if
@@ -360,20 +384,45 @@ program studentpack
      stop
   end if
 
+  ! Mudanca Felipe
+  ! Devolvendo a solucao em fileiras como uma possibilidade
+  if (MAXMEM .lt. MAXMEMOLD) then
+     if (xlin(n) .lt. xb(n,nmem)) then
+        xb(:,nmem + 1) = xlin
+        maxmindist(nmem + 1) = xlin(n)
+        btrial(nmem + 1) = 0 !0 indica a solucao do Thiago, sem Algencan
+     else
+        do i = 1,nmem
+           if (xlin(n) .ge. maxmindist(i)) then           
+              do j = nmem+1,i + 1,-1
+                 xb(:,j) = xb(:,j - 1)
+                 maxmindist(j) = maxmindist(j - 1)
+                 btrial(j) = btrial(j - 1)
+              end do
+              xb(:,i) = xlin
+              maxmindist(i) = xlin(n)
+              btrial(i) = 0
+              exit
+           end if
+        end do
+     end if
+     nmem = nmem + 1
+  end if
+  ! Fim Mudanca Felipe
+
 6001 continue
   
   call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
   
   if (xb(n,1) .lt. mindist) then
-  	  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.false.)
+     call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.false.)
   else
-  	  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
+     call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
   end if
-
 
   ! Free structures
   
-  deallocate(x,l,u,xb,maxmindist,btrial, stat=allocerr)
+  deallocate(x,l,u,xb,xlin,maxmindist,btrial, stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Deallocation error in main program'
      stop
@@ -454,7 +503,7 @@ end subroutine packsort
 !     ******************************************************
 !     ******************************************************
 
-subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
+subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
 
   ! This subroutine find the greatest value of the number of items
   ! that can be packed inside the given region. The value 'nite' is
@@ -466,7 +515,7 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
 
   ! SCALAR ARGUMENTS
   integer, intent(in) :: ntrials,ptype,ssize
-  real(kind=8), intent(in) :: H,MINDIST,W
+  real(kind=8), intent(in) :: H,MINDIST,W,perturb
 
   ! ARRAY ARGUMENTS
   real(kind=8), allocatable, intent(inout) :: tmpx(:)
@@ -482,7 +531,7 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
   character(len=80)     :: specfnm,outputfnm,vparam(10)
   logical               :: coded(11)
   logical,      pointer :: equatn(:),linear(:)
-  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:)
+  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xlin(:)
 
   ! LOCAL SCALARS
   integer      :: i,lnite,unite,ntrial
@@ -615,13 +664,28 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype)
 
   do ntrial = 1,ntrials
 
-     seed = 123456789.0D0 + ntrial
-     call RANDOM_SEED(PUT=seed)
-
-     call RANDOM_NUMBER(x)
-     do i = 1, n
-        x(i) = l(i) + x(i) * (u(i) - l(i))
-     end do
+  !Mudanca Felipe
+  !Ponto inicial aproveitando Thiago 
+  !Tem que definir xlin  
+     if (ntrial .eq. 1) then
+        call generate_x(x, n, W, H, ch, cw, nite)
+        !write(*, *) x(n), MINDIST, nite
+        ! Da pra mudar o programa do Thiago pra ele sair mais rapido no findgnite
+        if (x(n) .ge. MINDIST) exit
+	!call perturbation_x(xlin,x,n,nite,perturb) 
+	!qnt poderia estar definida dentro de perturbation_x
+	!tem que definir ela aqui se nao definir la
+     else
+  
+  	seed = 123456789.0D0 + ntrial
+     	call RANDOM_SEED(PUT=seed)
+  
+  	call RANDOM_NUMBER(x)
+     	do i = 1, n
+           x(i) = l(i) + x(i) * (u(i) - l(i))
+        end do
+     end if
+    ! Fim Mudanca Felipe
 
      call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac, &
      myevalhc,myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,&
@@ -2039,18 +2103,18 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
 
   !indentifies the maximum distance and if the case demands to change P with L
 
-  !dist_t = MAXVAL(Pdist_t)
-  do i = 1,6
-     aux = Pdist_t(1,i)
-     lin(i) = 1
-     do j = 1,A                                      !***Pode ser de alfa até omega?
-        if(Pdist_t(j,i) > aux)then
-           aux = Pdist_t(j,i)
-           lin(i) = j                         !***adicionei
-        end if
-     end do
-     dist_t(1,i) = aux
-  end do
+	!dist_t = MAXVAL(Pdist_t)
+	do i = 1,6
+		aux = Pdist_t(alfa,i)
+		lin(i) = 1
+		do j = alfa,omega                                      !***Pode ser de alfa até omega?
+			if(Pdist_t(j,i) > aux)then
+				aux = Pdist_t(j,i)
+				lin(i) = j                         !***adicionei
+			end if
+		end do
+		dist_t(1,i) = aux
+	end do
 
 
 
@@ -2197,5 +2261,83 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      
   end do
 
+  !write(*,*) 'Fim do generate.', x(n), dist_t
+  !write(*,*)
   return
 end subroutine generate_x
+
+
+
+subroutine perturbation_x(x, xp, n, A, qnt)
+  implicit none
+  integer, intent(in) :: n, A
+  !x is the array with the points we will generate and give back
+  real(kind=8), intent(inout) :: x(n), xp(n)
+  real(kind=8), intent(in) :: qnt
+  real(kind=8) :: cop(A,2)
+  integer :: i, linha1, hv, ultimalinha
+
+
+
+  if (x(2) == x(4)) then
+     hv=2
+  else
+     hv=1
+  end if
+
+
+  do i=1,n-1,2
+
+     cop((i+1)/2,1)=x(i)
+     cop((i+1)/2,2)=x(i+1)
+
+  end do
+
+
+
+  i=1;
+  do while (cop(1,hv)==cop(i,hv))
+
+     cop(i,hv)=(1-mod(real(i),2.0))*qnt*x(n)/2
+     i=i+1
+     if (i .gt. A) then
+        exit
+     end if
+  end do
+
+  linha1=i-1
+
+  i=1
+
+  do while (cop(A,hv)==cop(A-i+1,hv))
+     cop(A-i+1,hv)=cop(A,hv)-(1-mod(i,2))*qnt*x(n)/2
+     i=i+1
+     if (i .gt. A) then
+
+        exit
+     end if
+  end do
+
+
+  ultimalinha=A-i
+
+  do i=linha1,ultimalinha
+
+     cop(i+1,hv)=cop(i+1,hv)+(qnt*x(n))*((-1)**(i+1))
+
+  end do
+
+  do i=1,n-1
+     linha1=(i+1)/2
+     if (MOD(real(i),2.0) == 1) then
+        xp(i)=cop(linha1,1)
+     else
+        xp(i)=cop(linha1,2)
+     end if
+  end do
+
+  xp(n)= x(n)
+
+
+  return
+end subroutine perturbation_x
