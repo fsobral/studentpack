@@ -2103,6 +2103,7 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
 
   !indentifies the maximum distance and if the case demands to change P with L
 
+<<<<<<< HEAD
 	!dist_t = MAXVAL(Pdist_t)
 	do i = 1,6
 		aux = Pdist_t(alfa,i)
@@ -2115,8 +2116,20 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
 		end do
 		dist_t(1,i) = aux
 	end do
-
-
+=======
+  !dist_t = MAXVAL(Pdist_t)
+  do i = 1,6
+     aux = Pdist_t(alfa,i)
+     lin(i) = 1
+     do j = alfa,omega                                      !***Pode ser de alfa até omega?
+        if(Pdist_t(j,i) > aux)then
+           aux = Pdist_t(j,i)
+           lin(i) = j                         !***adicionei
+        end if
+     end do
+     dist_t(1,i) = aux
+  end do
+>>>>>>> e2ab523a28e59024e482afb79640cc2d2602c4d7
 
   dist = MAXVAL(dist_t)
 
