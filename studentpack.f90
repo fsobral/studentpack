@@ -8,7 +8,7 @@ program studentpack
   character(len=15) :: LTEXSOL = 'solution.tex', &
                        JSONSOL = 'solution.json'
   integer           :: MAXMEM = 5
-  real(kind=8)      :: PERTURBATION = 0.0D-2
+  real(kind=8)      :: PERTURBATION = 0.1D0
   
   ! LOCAL SCALARS
   logical      :: checkder
@@ -119,13 +119,12 @@ program studentpack
   br    = 0
   nbr   = 0
 
-  ! If problem type is 2, try to find the maximum number of chairs,
+  ! If problem type is 2 or 4, try to find the maximum number of chairs,
   ! respecting the minimum distance.
   if ( ptype .eq. 2 .or. ptype .eq. 4 ) then
      call findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,PERTURBATION)
   end if
 
-  !write(*,*) 'NITE', nite
   
   ! Finish allocating the structure of regions
   
@@ -235,27 +234,23 @@ program studentpack
   maxmindist = 0.0D0
   nmem       = 0
 
-  !Mudanca Felipe
   ! Vamos devolver a solucao em filas como uma opcao se possivel
-  !Tem que definir MAXMEMOLD
   MAXMEMOLD = MAXMEM
-  ! Fim Mudanca Felipe
-
 
   do ntrial = 1,ntrials
 
-  !Mudanca Felipe
-  !Ponto inicial aproveitando Thiago 
-  !Tem que definir xlin  
+  !Ponto inicial aproveitando Thiago   
      if (ntrial .eq. 1) then
-     		call generate_x(xlin, n, W, H, ch, cw, nite)
-        !write(*,*) 'Entrou na perturbacao ', MAXMEM, x(n), MINDIST, nite
+        ! Aqui daria pra dar uma quantidade de tentativas pro Thiago
+     	call generate_x(xlin, n, W, H, ch, cw, nite)        
         if (xlin(n) .ge. MINDIST .and. MAXMEM .gt. 1) then
-           MAXMEM = MAXMEM-1 !uma opcao eh  xlin, mesmo que pior
+           MAXMEM = MAXMEM-1 
+        !uma opcao eh  xlin, mesmo que pior entao eu vou guardar
+        !uma solucao de ALGENCAN a menos
         end if
         call perturbation_x(xlin,x,n,nite,PERTURBATION) 
-	!qnt poderia estar definida dentro de perturbation_x
-	!tem que definir ela aqui se nao definir la
+	!Comentario Felipe
+        !Esta de acordo com o que eu penso entra xlin e sai x
      else
 			 	seed = 123456789.0D0 + ntrial
 				call RANDOM_SEED(PUT=seed)
@@ -264,7 +259,7 @@ program studentpack
 		    	x(i) = l(i) + x(i) * (u(i) - l(i))
 		    end do
      end if
-    ! Fim Mudanca Felipe
+
 
      call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc, &
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,jcnnzmax, &
@@ -276,8 +271,12 @@ program studentpack
      vover = minover(n,x)
      valoc = maxaloc(n,x,l,u)
 
-     ! Sugestao do Felipe
+     
      x(n) = vover
+     ! Comentario Felipe: Bom pra gente ver se a solucao esta vindo da do 
+     ! Thiago perturbada
+     !write(*,*) 'VALOR DE VOVER: ', vover
+
      
      if ( vover .ge. MINDIST .and. valoc .le. ERR) then
         call packsort(n,x,nite,ndim)
@@ -370,7 +369,6 @@ program studentpack
      vover = minover(n,xb(1:n,j))
      valoc = maxaloc(n,xb(1:n,j),l,u)
 
-     ! Sugestao do Felipe
      xb(n,j) = vover
      
      write(*,8020) btrial(j),maxmindist(j),vover,xb(n,j),valoc
@@ -384,7 +382,6 @@ program studentpack
      stop
   end if
 
-  ! Mudanca Felipe
   ! Devolvendo a solucao em fileiras como uma possibilidade
   if (MAXMEM .lt. MAXMEMOLD) then
      if (xlin(n) .lt. xb(n,nmem)) then
@@ -408,7 +405,7 @@ program studentpack
      end if
      nmem = nmem + 1
   end if
-  ! Fim Mudanca Felipe
+
 
 6001 continue
   
@@ -664,17 +661,13 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
 
   do ntrial = 1,ntrials
 
-  !Mudanca Felipe
-  !Ponto inicial aproveitando Thiago 
-  !Tem que definir xlin  
+
      if (ntrial .eq. 1) then
-        call generate_x(x, n, W, H, ch, cw, nite)
-        !write(*, *) x(n), MINDIST, nite
+        call generate_x(xlin, n, W, H, ch, cw, nite)
+        ! Comentario
         ! Da pra mudar o programa do Thiago pra ele sair mais rapido no findgnite
-        if (x(n) .ge. MINDIST) exit
-	!call perturbation_x(xlin,x,n,nite,perturb) 
-	!qnt poderia estar definida dentro de perturbation_x
-	!tem que definir ela aqui se nao definir la
+        if (xlin(n) .ge. MINDIST) exit
+	call perturbation_x(xlin,x,n,nite,perturb) 
      else
   
   	seed = 123456789.0D0 + ntrial
@@ -2273,11 +2266,16 @@ subroutine perturbation_x(x, xp, n, A, qnt)
   integer, intent(in) :: n, A
   !x is the array with the points we will generate and give back
   real(kind=8), intent(inout) :: x(n), xp(n)
+  !Comentario Felipe
+  !Muito esquisito x e xp serem inout.  
+  !Acho que entra x e sai xp como sendo a solucao perturbada. 
   real(kind=8), intent(in) :: qnt
   real(kind=8) :: cop(A,2)
   integer :: i, linha1, hv, ultimalinha
 
-
+  !Comentario Felipe:
+  !Se o usuario der um aluno isso da erro.
+  ! A perturbacao nao deveria considerar cada um dos 6 casos?
 
   if (x(2) == x(4)) then
      hv=2
