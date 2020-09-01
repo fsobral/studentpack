@@ -20,7 +20,7 @@ program studentpack
   character(len=80)     :: specfnm,outputfnm,vparam(10)
   logical               :: coded(11)
   logical,      pointer :: equatn(:),linear(:)
-  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),xlin(:),maxmindist(:)
+  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),maxmindist(:),xlin(:)
   real(kind=8), allocatable :: tmpx(:)
   integer     , pointer :: seed(:),btrial(:)
 
@@ -141,7 +141,7 @@ program studentpack
 
   ! Set lower bounds, upper bounds, and initial guess
 
-  allocate(x(n),l(n),u(n),xb(n,MAXMEM),xlin(n),btrial(MAXMEM), &
+  allocate(x(n),xlin(n),l(n),u(n),xb(n,MAXMEM),btrial(MAXMEM), &
            maxmindist(MAXMEM),stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Allocation error in main program'
@@ -239,25 +239,26 @@ program studentpack
 
   do ntrial = 1,ntrials
 
-  !Ponto inicial aproveitando Thiago   
+     ! Ponto inicial aproveitando Thiago   
      if (ntrial .eq. 1) then
         ! Aqui daria pra dar uma quantidade de tentativas pro Thiago
      	call generate_x(xlin, n, W, H, ch, cw, nite)        
-        if (xlin(n) .ge. MINDIST .and. MAXMEM .gt. 1) then
-           MAXMEM = MAXMEM-1 
+        if (xlin(n) .ge. MINDIST - ERR .and. MAXMEM .gt. 1) then
+           MAXMEM = MAXMEM - 1
         !uma opcao eh  xlin, mesmo que pior entao eu vou guardar
         !uma solucao de ALGENCAN a menos
         end if
-        call perturbation_x(xlin,x,n,nite,PERTURBATION) 
+        x(:) = xlin(:)
+        call perturbation_x(x,n,nite,PERTURBATION) 
 	!Comentario Felipe
         !Esta de acordo com o que eu penso entra xlin e sai x
      else
-			 	seed = 123456789.0D0 + ntrial
-				call RANDOM_SEED(PUT=seed)
-				call RANDOM_NUMBER(x)
-				do i = 1, n
-		    	x(i) = l(i) + x(i) * (u(i) - l(i))
-		    end do
+        seed = 123456789.0D0 + ntrial
+        call RANDOM_SEED(PUT=seed)
+        call RANDOM_NUMBER(x)
+        do i = 1, n
+           x(i) = l(i) + x(i) * (u(i) - l(i))
+        end do
      end if
 
 
@@ -278,7 +279,7 @@ program studentpack
      !write(*,*) 'VALOR DE VOVER: ', vover
 
      
-     if ( vover .ge. MINDIST .and. valoc .le. ERR) then
+     if ( vover .ge. MINDIST - ERR .and. valoc .le. ERR) then
         call packsort(n,x,nite,ndim)
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
@@ -384,13 +385,15 @@ program studentpack
 
   ! Devolvendo a solucao em fileiras como uma possibilidade
   if (MAXMEM .lt. MAXMEMOLD) then
-     if (xlin(n) .lt. xb(n,nmem)) then
+     if (nmem .eq. 0) then
+        xb(:, 1) = xlin(:)
+     else if (xlin(n) .lt. xb(n,nmem)) then
         xb(:,nmem + 1) = xlin
         maxmindist(nmem + 1) = xlin(n)
         btrial(nmem + 1) = 0 !0 indica a solucao do Thiago, sem Algencan
      else
         do i = 1,nmem
-           if (xlin(n) .ge. maxmindist(i)) then           
+           if (xlin(n) .ge. xb(n,i)) then           
               do j = nmem+1,i + 1,-1
                  xb(:,j) = xb(:,j - 1)
                  maxmindist(j) = maxmindist(j - 1)
@@ -406,7 +409,6 @@ program studentpack
      nmem = nmem + 1
   end if
 
-
 6001 continue
   
   call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
@@ -419,7 +421,7 @@ program studentpack
 
   ! Free structures
   
-  deallocate(x,l,u,xb,xlin,maxmindist,btrial, stat=allocerr)
+  deallocate(x,xlin,l,u,xb,maxmindist,btrial, stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Deallocation error in main program'
      stop
@@ -528,7 +530,7 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
   character(len=80)     :: specfnm,outputfnm,vparam(10)
   logical               :: coded(11)
   logical,      pointer :: equatn(:),linear(:)
-  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xlin(:)
+  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:)
 
   ! LOCAL SCALARS
   integer      :: i,lnite,unite,ntrial
@@ -570,7 +572,7 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
 
      call generate_x(x, n, W, H, cH, cW, nite)
 
-     if ( x(n) .lt. MINDIST ) then
+     if ( x(n) .lt. MINDIST - ERR ) then
 
         write(*,9050) nite, 0
         unite = nite
@@ -663,11 +665,11 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
 
 
      if (ntrial .eq. 1) then
-        call generate_x(xlin, n, W, H, ch, cw, nite)
+        call generate_x(x, n, W, H, ch, cw, nite)
         ! Comentario
         ! Da pra mudar o programa do Thiago pra ele sair mais rapido no findgnite
-        if (xlin(n) .ge. MINDIST) exit
-	call perturbation_x(xlin,x,n,nite,perturb) 
+        if (x(n) .ge. MINDIST - ERR) exit
+	call perturbation_x(x,n,nite,perturb) 
      else
   
   	seed = 123456789.0D0 + ntrial
@@ -690,7 +692,7 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
      vover = minover(n,x)
      mxaloc = maxaloc(n,x,l,u)
 
-     if ( vover .ge. MINDIST .and. mxaloc .le. ERR ) exit
+     if ( vover .ge. MINDIST - ERR .and. mxaloc .le. ERR ) exit
 
   end do
 
@@ -2261,11 +2263,11 @@ end subroutine generate_x
 
 
 
-subroutine perturbation_x(x, xp, n, A, qnt)
+subroutine perturbation_x(x, n, A, qnt)
   implicit none
   integer, intent(in) :: n, A
   !x is the array with the points we will generate and give back
-  real(kind=8), intent(inout) :: x(n), xp(n)
+  real(kind=8), intent(inout) :: x(n)
   !Comentario Felipe
   !Muito esquisito x e xp serem inout.  
   !Acho que entra x e sai xp como sendo a solucao perturbada. 
@@ -2273,69 +2275,67 @@ subroutine perturbation_x(x, xp, n, A, qnt)
   real(kind=8) :: cop(A,2)
   integer :: i, linha1, hv, ultimalinha
 
+  ! LOCAL SCALARS
+  real(kind=8) :: radius
+
   !Comentario Felipe:
   !Se o usuario der um aluno isso da erro.
   ! A perturbacao nao deveria considerar cada um dos 6 casos?
 
+  ! Fix issue when the number of chairs is smaller than 2
+  if (n .lt. 5) return
+  
   if (x(2) == x(4)) then
      hv=2
   else
      hv=1
   end if
 
+  radius = x(n) / 2.0D0
 
-  do i=1,n-1,2
+  do i = 1, n-1, 2
+     cop((i + 1) / 2, 1) = x(i)
+     cop((i + 1) / 2, 2) = x(i+1)
+  end do
 
-     cop((i+1)/2,1)=x(i)
-     cop((i+1)/2,2)=x(i+1)
+  i = 1
+  do while (cop(1,hv) .eq.  cop(i,hv))
+
+     cop(i,hv) = (1 - MOD(REAL(i), 2.0)) * qnt * radius
+     i = i + 1
+     if (i .gt. A) exit
 
   end do
 
+  linha1 = i - 1
 
+  i = 1
 
-  i=1;
-  do while (cop(1,hv)==cop(i,hv))
-
-     cop(i,hv)=(1-mod(real(i),2.0))*qnt*x(n)/2
-     i=i+1
-     if (i .gt. A) then
-        exit
-     end if
+  do while (cop(A,hv) .eq. cop(A - i + 1,hv))
+     cop(A - i + 1,hv) = cop(A,hv) - (1 - MOD(i,2)) * qnt * radius
+     i = i + 1
+     if (i .gt. A) exit
   end do
 
-  linha1=i-1
+  ultimalinha = A - i
 
-  i=1
-
-  do while (cop(A,hv)==cop(A-i+1,hv))
-     cop(A-i+1,hv)=cop(A,hv)-(1-mod(i,2))*qnt*x(n)/2
-     i=i+1
-     if (i .gt. A) then
-
-        exit
-     end if
+  do i = linha1, ultimalinha
+     cop(i + 1,hv) = cop(i + 1,hv) + (qnt * 2.0D0 * radius) * ((-1) ** (i + 1))
   end do
 
+  x(1:n - 1:2) = cop(:, 1)
+  x(2:n - 1:2) = cop(:, 2)
+  
+  ! do i = 1, n - 1
+  !    linha1 = (i + 1) / 2
+  !    if (MOD(real(i),2.0) == 1) then
+  !       x(i)=cop(linha1,1)
+  !    else
+  !       x(i)=cop(linha1,2)
+  !    end if
+  ! end do
 
-  ultimalinha=A-i
+  ! Does not need to do this, of course
+  ! x(n) = x(n)
 
-  do i=linha1,ultimalinha
-
-     cop(i+1,hv)=cop(i+1,hv)+(qnt*x(n))*((-1)**(i+1))
-
-  end do
-
-  do i=1,n-1
-     linha1=(i+1)/2
-     if (MOD(real(i),2.0) == 1) then
-        xp(i)=cop(linha1,1)
-     else
-        xp(i)=cop(linha1,2)
-     end if
-  end do
-
-  xp(n)= x(n)
-
-
-  return
 end subroutine perturbation_x
