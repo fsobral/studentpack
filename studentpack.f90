@@ -151,8 +151,11 @@ program studentpack
   ! Rows
 
   if ( ptype .eq. 4 ) then
-     xb(1:n, 1) = tmpx
-     nmem = 1
+
+     if (tmpx(n) .gt. MINDIST - ERR) then
+        xb(1:n, 1) = tmpx
+        nmem = 1
+     end if
 
      ! We need to deallocate tmpx that was used for findgnite with
      ! ptype = 4.
@@ -166,8 +169,11 @@ program studentpack
   end if
   
   if ( ptype .eq. 3 ) then
-     call generate_x(xb(1:n,1), n, W, H, cH, cW, nite)
-     nmem = 1
+     call generate_x(x, n, W, H, cH, cW, nite)
+     if (x(n) .gt. MINDIST - ERR) then
+        xb(1:n, 1) = x
+        nmem = 1
+     end if
      goto 6001
   end if
   
@@ -413,7 +419,7 @@ program studentpack
   
   call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
   
-  if (xb(n,1) .lt. mindist) then
+  if (nmem .eq. 0) then
      call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.false.)
   else
      call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
