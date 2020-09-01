@@ -248,7 +248,8 @@ program studentpack
      ! Ponto inicial aproveitando Thiago   
      if (ntrial .eq. 1) then
         ! Aqui daria pra dar uma quantidade de tentativas pro Thiago
-     	call generate_x(xlin, n, W, H, ch, cw, nite)        
+        call generate_x(xlin, n, W, H, ch, cw, nite)
+        if (nite .eq. 1) xlin(n) = MINDIST
         if (xlin(n) .ge. MINDIST - ERR .and. MAXMEM .gt. 1) then
            MAXMEM = MAXMEM - 1
         !uma opcao eh  xlin, mesmo que pior entao eu vou guardar
@@ -276,8 +277,8 @@ program studentpack
 
      ! TEST SOLUTION
      vover = minover(n,x)
+     if (nite .eq. 1) vover = MINDIST
      valoc = maxaloc(n,x,l,u)
-
      
      x(n) = vover
      ! Comentario Felipe: Bom pra gente ver se a solucao esta vindo da do 
@@ -374,6 +375,7 @@ program studentpack
 
      ! TEST SOLUTION
      vover = minover(n,xb(1:n,j))
+     if (nite .eq. 1) vover = MINDIST
      valoc = maxaloc(n,xb(1:n,j),l,u)
 
      xb(n,j) = vover
