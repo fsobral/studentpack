@@ -1877,9 +1877,12 @@ subroutine region(nregw,nregh,iterad,x,y,i,j)
 
 end subroutine region
 
+!     ******************************************************************
+!     ******************************************************************
+
 subroutine generate_x(x, n, W, H, ch, cw, A)
   implicit none
-  integer :: i, j, caso  , lin(6), cox, coy, cb
+  integer :: i, j, caso  , lin(7), cox, coy, cb
   ! n is the number of variables
   ! A is the number of chairs
   integer, intent(in) :: n, A
@@ -1887,27 +1890,19 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
   real(kind=8), intent(inout) :: x(n)
   ! P and L are the dimensions of the room
   real(kind=8), intent(in):: W, H, ch, cw
-
-  real(kind=8) :: Tz(A,2), Ts(A,2), Td(A,2), Pdist_t(A,6)
-  real(kind=8) :: ajuste_t(A,6), provaL, P, L, limbase(A,6)
-  real(kind=8) :: dist_t(1,6), dist, aux, Z(A,2), S(A,2), D(A,2)
-  real(kind=8) :: camada, camadadupla, v(6), so_t(2)
+  real(kind=8) :: Tz(A,2),Ts(A,2),Td(A,2),Tq(A,2),Pdist_t(A,7)
+  real(kind=8) :: ajuste_t(A,7), provaL, P, L, limbase(A,7)
+  real(kind=8) :: dist_t(1,7), dist, aux, Z(A,2), S(A,2), D(A,2)
+  real(kind=8) :: camada, camadadupla, v(7), so_t(2)
   real(kind=8) :: pit2(4), pit1(4), coo(A,2), cod(A,2)
-
-  !***adicionei***
   real(kind=8) :: raz
   integer :: m1, m2, alfa, omega,  linha1
-  !***adicionei***
-
-  !***adicionei***
   real(kind=8) :: d_v
   integer :: caso_v
-  !***adicionei***
 
   P = W - cw / 2.0D0
   L = H - ch
 
-  !***adicionei***
   raz = P/L
   m1 = NINT(SQRT(A*raz))
   m2 = NINT(SQRT(A/raz))
@@ -1938,8 +1933,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
 
 
   ! Zig-zag sizes (Tz):
-
-
   ! With more than 6 students, they will be distibuted in vertices
   !of equilateral triangles. The array "Tz" stores the bases
   !and the heights of them in function of the side "l".
@@ -1956,10 +1949,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
   end do
 
   Tz(1,2) = 0.000001; !considering the width of a single line
-
-
-
-  !read *, tt
 
   ! Bases in P
   do i=alfa,omega
@@ -1990,8 +1979,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
   ! _O_O_
   ! O_O_O
 
-
-
   S(1,1) = A
   S(1,2) = 1
 
@@ -1999,8 +1986,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      S(i,1) = CEILING((A - CEILING(real(i)/2.0))/ real(i)) + 1.0
      S(i, 2) = i
   end do
-
-
 
   ! Sandwich sizes:
   ! First column has the sum of the bases of the first line
@@ -2015,10 +2000,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
   end do
 
   Ts(1,2) = 0.000001 ! Considering the width of a single row
-
-
-
-
 
   !Bases in P
   do i=alfa,omega
@@ -2043,7 +2024,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
   end do
 
 
-
   !=========  Double Layer pattern   =========
   ! O_O_O
   ! O_O_O
@@ -2060,7 +2040,6 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      D(i,2)= i
   end do
 
-
   ! Double layer sizes:
   ! First row has the sum of the bases of the first line
   ! Second row has the sum of the heights
@@ -2074,9 +2053,7 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      Td(i,2)= (S(i,2) - 2.0)*SQRT(3.0)/2.0 + 1.0
   end do
 
-  Td(1,2) = 0.000001 ! Considerando a altura de uma única fileira
-
-
+  Td(1,2) = 0.000001 ! Considerando a altura de uma Ãºnica fileira
 
   !Bases in P
   do i=alfa,omega
@@ -2100,53 +2077,70 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      limbase(i,6)= Pdist_t(i,6)*Td(i,1) !***adicionei***
   end do
 
+  !===============Square pattern=========================
+  !O_O_O
+  !O_O_O
+  !O_O_O
 
+  ! In this case, variable Z, from do zig-zag pattern will be used
+  ! to find the number of squares we need.
+
+
+  do i=alfa,omega
+     !With n squares, we have n-1 bases and heights.
+     Tq(i,1)= Z(i,1)-1
+     Tq(i,2)= Z(i,2)-1
+  end do
+
+  Tq(1,2)=0.000001;
+
+
+
+  do i=alfa,omega  !This pattern is symetric for 90ø rotation
+     Pdist_t(i,7)= P/Tq(i,1);
+     provaL=Pdist_t(i,7)*Tq(i,2);
+     if (provaL .gt. L) then
+        ajuste_t(i,7) = provaL
+        Pdist_t(i,7) = L / Tq(i,2)
+     end if
+     limbase(i,7)= Pdist_t(i,7)*Tq(i,1);
+  end do
 
   ! ==================================
 
   !indentifies the maximum distance and if the case demands to change P with L
-
-	!dist_t = MAXVAL(Pdist_t)
-	do i = 1,6
-		aux = Pdist_t(alfa,i)
-		lin(i) = 1
-		do j = alfa,omega                                      !***Pode ser de alfa até omega?
-			if(Pdist_t(j,i) > aux)then
-				aux = Pdist_t(j,i)
-				lin(i) = j                         !***adicionei
-			end if
-		end do
-		dist_t(1,i) = aux
-	end do
-
-
+  !dist_t = MAXVAL(Pdist_t)
+  do i = 1,7
+     aux = Pdist_t(alfa,i)
+     lin(i) = 1
+     do j = alfa,omega
+        if(Pdist_t(j,i) > aux)then
+           aux = Pdist_t(j,i)
+           lin(i) = j
+        end if
+     end do
+     dist_t(1,i) = aux
+  end do
 
   dist = MAXVAL(dist_t)
 
   !caso = MAXLOC(dist_t)
-  do i = 1,6
+  do i = 1,7
      if(dist_t(1,i) == dist) then
         caso = i
         EXIT
      end if
   end do
 
-
-
-  !***adicionei***
-
   pit1(1) = ((dist_t(1,1)*P/limbase(lin(1),1))/2)**2
   pit1(2) = ((dist_t(1,2)*L/limbase(lin(2),2))/2)**2
   pit1(3) = ((dist_t(1,3)*P/limbase(lin(3),3))/2)**2
   pit1(4) = ((dist_t(1,4)*L/limbase(lin(4),4))/2)**2
 
-
   pit2(1) = dist_t(1,1)**2  * 0.75
   pit2(2) = dist_t(1,2)**2  * 0.75
   pit2(3) = dist_t(1,3)**2  * 0.75
   pit2(4) = dist_t(1,4)**2  * 0.75
-
-
 
   v(1)=sqrt(pit1(1)+pit2(1))
   v(2)=sqrt(pit1(2)+pit2(2))
@@ -2154,12 +2148,13 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
   v(4)=sqrt(pit1(4)+pit2(4))
   v(5)=dist_t(1,5)
   v(6)=dist_t(1,6)
+  v(7)=dist_t(1,7)
 
   !caso_v = MAXLOC(v)
   !d_v = MAXVAL(v)
   d_v = v(1)
   caso_v = 1
-  do i = 2,6
+  do i = 2,7
      if(v(i) > d_v)then
         d_v = v(i)
         caso_v = i
@@ -2171,9 +2166,7 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      caso=caso_v
   end if
 
-  !***adicionei***
-
-  !rounding the milimiters     !***Isso eu tirei pra comparar as medidas
+  !rounding the milimiters
   !dist = FLOOR(dist*1000.0)/1000.0
 
   !verifies if the bases were constructed over L or over P and change them if needed
@@ -2194,43 +2187,58 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
 
   !==========  Exporting the coordinates  ==========
   camada = 1.0
-
   coo(1,1) = 0.0
   coo(1,2) = 0.0
 
-  do i=2,A
-     coo(i,1)=coo(i-1,1)+dist;
-     coo(i,2)=coo(i-1,2);
-     if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
-        camada = camada + 1
-        coo(i,2) = coo(i,2) + (dist * SQRT(3.0)/2.0)
-        coo(i,1) = dist / 2.0 * (1.0 - MOD(camada,2.0))
-        if (camadadupla == 1) then
-           coo(i,2) = dist
-           coo(i,1) = 0
-           camadadupla = 0
-           camada = 1
+  if (caso .lt. 7) then !Coordinates routine is diferent for case 7
+
+     do i=2,A
+        coo(i,1)=coo(i-1,1)+dist;
+        coo(i,2)=coo(i-1,2);
+        if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
+           camada = camada + 1
+           coo(i,2) = coo(i,2) + (dist * SQRT(3.0)/2.0)
+           coo(i,1) = dist / 2.0 * (1.0 - MOD(camada,2.0))
+           if (camadadupla == 1) then
+              coo(i,2) = dist
+              coo(i,1) = 0
+              camadadupla = 0
+              camada = 1
+           end if
+        end if
+     end do
+
+     cod=coo
+
+     so_t=MAXVAL(cod, dim=1)
+
+
+     if ((P-so_t(1)) > (L-so_t(2))) then
+        if  (so_t(1) .ne. 0) then
+           do i=1,A
+              cod(i,1)= cod(i,1)*P/(so_t(1))
+           end do
+        end if
+     else
+        if  (so_t(2) .ne. 0) then
+           do i=1,A
+              cod(i,2)= cod(i,2)*L/(so_t(2))
+           end do
         end if
      end if
-  end do
 
-  cod=coo
+  else   !Coordinates routine for case 7
 
-  so_t=MAXVAL(cod, dim=1)
-
-
-  if ((P-so_t(1)) > (L-so_t(2))) then
-     if  (so_t(1) .ne. 0) then
-        do i=1,A
-           cod(i,1)= cod(i,1)*P/(so_t(1))
-        end do
-     end if
-  else
-     if  (so_t(2) .ne. 0) then
-        do i=1,A
-           cod(i,2)= cod(i,2)*L/(so_t(2))
-        end do
-     end if
+     do i=2,A
+        coo(i,1)=coo(i-1,1)+dist_t(1,7)
+        coo(i,2)=coo(i-1,2)
+        if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
+           camada=camada+1
+           coo(i,2)=coo(i,2)+(dist_t(1,7))
+           coo(i,1)=0
+        end if
+     end do
+     cod=coo
   end if
 
   dist=v(caso)
@@ -2248,28 +2256,23 @@ subroutine generate_x(x, n, W, H, ch, cw, A)
      linha1=(i+1)/2
      if (MOD(real(i),2.0) == 1) then
         x(i)=cod(linha1,cox)
-        !   xp(i)=cop(linha1,cox)
      else
         x(i)=cod(linha1,coy)
-        !  xp(i)=cop(linha1,coy)
      end if
   end do
 
   x(n) = dist
 
   do i = 1, A
-
      x(2 * i - 1) = x(2 * i - 1) + cw / 2.0D0
      x(2 * i)     = x(2 * i)     + ch / 2.0D0
-     
   end do
 
-  !write(*,*) 'Fim do generate.', x(n), dist_t
-  !write(*,*)
   return
 end subroutine generate_x
 
-
+!     ******************************************************************
+!     ******************************************************************
 
 subroutine perturbation_x(x, n, A, qnt)
   implicit none
