@@ -44,8 +44,10 @@ program studentpack
   end interface
   
   ! LOCAL SCALARS
-  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem,MAXMEMOLD
-  real(kind=8) :: H,vover,valoc,W
+  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem,MAXMEMOLD, &
+       imaxdist,nsuctrials
+  real(kind=8) :: H,vover,valoc,W,tstart,tend,dtimef,dtimei,dtimeo, &
+       dtimemd,maxdist
 
   ! FUNCTIONS
   real(kind=8) :: maxaloc,minover,overlap
@@ -99,6 +101,15 @@ program studentpack
      write(*,*) 'Enter the number of chairs: '
      read(*,*) nite
   end if
+
+  ! INITIALIZE STATISTICS
+  maxdist    = 0.0d0
+  imaxdist   = -1
+  nsuctrials = 0
+  dtimef  = 0.0d0
+  dtimei  = 0.0d0
+  dtimeo  = 0.0d0
+  dtimemd = 0.0d0
   
   ! INITIALIZE REGIONS
 
@@ -121,11 +132,15 @@ program studentpack
 
   ! If problem type is 2 or 4, try to find the maximum number of chairs,
   ! respecting the minimum distance.
+  call CPU_TIME(tstart)
   if ( ptype .eq. 2 .or. ptype .eq. 4 ) then
      call findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,PERTURBATION)
   end if
+  call CPU_TIME(tend)
+  dtimef = tend - tstart
 
-  
+  call CPU_TIME(tstart)
+
   ! Finish allocating the structure of regions
   
   allocate(diagb(ndim,ndim,nite),next(nite))
@@ -287,6 +302,16 @@ program studentpack
 
      
      if ( vover .ge. MINDIST - ERR .and. valoc .le. ERR) then
+
+        ! Statistics
+        nsuctrials = nsuctrials + 1
+        if (vover .gt. maxdist) then
+           maxdist  = vover
+           imaxdist = ntrial
+           call CPU_TIME(tend)
+           dtimemd = tend - tstart
+        end if
+
         call packsort(n,x,nite,ndim)
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
@@ -320,12 +345,17 @@ program studentpack
   
   end do
 
+  call CPU_TIME(tend)
+  dtimei = tend - tstart
+  
   if ( nmem .eq. 0 .and. MAXMEM .eq. MAXMEMOLD ) then
      call tojson(n,nmem,xb,nite,W,H,JSONSOL,.false.)
      stop
   end if
   
   ! RUN CONSTRAINED PROBLEM
+
+  call CPU_TIME(tstart)
   
   deallocate(equatn,linear,lambda)
 
@@ -417,6 +447,9 @@ program studentpack
      nmem = nmem + 1
   end if
 
+  call CPU_TIME(tend)
+  dtimeo = tend - tstart
+  
 6001 continue
   
   call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
@@ -441,6 +474,9 @@ program studentpack
      stop
   end if
 
+  write(*,8030) 'MAXD','IMAXD','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
+  write(*,8031) maxdist,imaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
+
   stop
 
   ! NON-EXECUTABLE STATEMENTS
@@ -450,7 +486,9 @@ program studentpack
        ' described in:',/                                       &
        /,' to appear.',/)
 8020 format(' Trial = ',I4,' Min Dist (best = ',F12.8,') = ',F12.8, &
-       ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
+          ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
+8030 format(/,A12,1X,A5,1X,A5,1X,A7,1X,A7,1X,A7,1X,A7)
+8031 format(F12.8,1X,I5,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
 
 end program studentpack
 
