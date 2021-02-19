@@ -460,6 +460,9 @@ program studentpack
      call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
   end if
 
+  write(*,8030) 'BSOL','MAXD','IMAXD','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
+  write(*,8031) MAXVAL(maxmindist),maxdist,imaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
+
   ! Free structures
   
   deallocate(x,xlin,l,u,xb,maxmindist,btrial, stat=allocerr)
@@ -474,9 +477,6 @@ program studentpack
      stop
   end if
 
-  write(*,8030) 'MAXD','IMAXD','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
-  write(*,8031) maxdist,imaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
-
   stop
 
   ! NON-EXECUTABLE STATEMENTS
@@ -487,8 +487,8 @@ program studentpack
        /,' to appear.',/)
 8020 format(' Trial = ',I4,' Min Dist (best = ',F12.8,') = ',F12.8, &
           ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
-8030 format(/,A12,1X,A5,1X,A5,1X,A7,1X,A7,1X,A7,1X,A7)
-8031 format(F12.8,1X,I5,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
+8030 format(/,A12,1X,A12,1X,A5,1X,A5,1X,A7,1X,A7,1X,A7,1X,A7)
+8031 format(F12.8,1X,F12.8,1X,I5,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
 
 end program studentpack
 
