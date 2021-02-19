@@ -305,8 +305,7 @@ program studentpack
 
         ! Statistics
         nsuctrials = nsuctrials + 1
-        if ( (vover .gt. maxdist) .and. &
-             (abs(vover - maxdist) / max(maxdist, 1.0) .gt. 1.0d-2) ) then
+        if ( vover .gt. maxdist + ERR ) then
            maxdist  = vover
            imaxdist = ntrial
            call CPU_TIME(tend)
