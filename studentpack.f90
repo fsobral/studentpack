@@ -319,7 +319,7 @@ program studentpack
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
                 ( nmem .lt. MAXMEM .and. &
-                  vover .ge. maxmindist(i) .and. &
+                  vover .gt. maxmindist(i) .and. &
                   MAXVAL(ABS(x(1:n) - xb(1:n,i))) .gt. ERR ) ) then
 
               if ( nmem .lt. MAXMEM ) nmem = nmem + 1
