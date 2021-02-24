@@ -45,9 +45,9 @@ program studentpack
   
   ! LOCAL SCALARS
   integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem,MAXMEMOLD, &
-       imaxdist,nsuctrials
+       imaxdist,nsuctrials,ibstsol
   real(kind=8) :: H,vover,valoc,W,tstart,tend,dtimef,dtimei,dtimeo, &
-       dtimemd,maxdist
+       dtimemd,maxdist,omaxdist,bstsol
 
   ! FUNCTIONS
   real(kind=8) :: maxaloc,minover,overlap
@@ -104,7 +104,10 @@ program studentpack
 
   ! INITIALIZE STATISTICS
   maxdist    = 0.0d0
+  omaxdist   = 0.0d0
+  bstsol     = 0.0d0
   imaxdist   = -1
+  ibstsol    = -1
   nsuctrials = 0
   dtimef  = 0.0d0
   dtimei  = 0.0d0
@@ -315,7 +318,8 @@ program studentpack
         call packsort(n,x,nite,ndim)
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
-                ( ABS(vover - maxmindist(i)) .le. ERR .and. &
+                ( nmem .lt. MAXMEM .and. &
+                  vover .ge. maxmindist(i) .and. &
                   MAXVAL(ABS(x(1:n) - xb(1:n,i))) .gt. ERR ) ) then
 
               if ( nmem .lt. MAXMEM ) nmem = nmem + 1
@@ -350,7 +354,7 @@ program studentpack
   
   if ( nmem .eq. 0 .and. MAXMEM .eq. MAXMEMOLD ) then
      call tojson(n,nmem,xb,nite,W,H,JSONSOL,.false.)
-     stop
+     goto 6002
   end if
   
   ! RUN CONSTRAINED PROBLEM
@@ -447,6 +451,14 @@ program studentpack
      nmem = nmem + 1
   end if
 
+  do i = 1, nmem
+     if (maxmindist(i) .gt. bstsol) then
+        bstsol = maxmindist(i)
+        ibstsol = btrial(i)
+     end if
+     if (btrial(i) .eq. imaxdist) omaxdist = maxmindist(i)
+  end do
+
   call CPU_TIME(tend)
   dtimeo = tend - tstart
   
@@ -460,8 +472,10 @@ program studentpack
      call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
   end if
 
-  write(*,8030) 'BSOL','MAXD','IMAXD','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
-  write(*,8031) MAXVAL(maxmindist),maxdist,imaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
+6002 continue
+  
+  write(*,8030) 'BSOL','IBSOL','MAXD','IMAXD','MAXDO','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
+  write(*,8031) bstsol,ibstsol,maxdist,imaxdist,omaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
 
   ! Free structures
   
@@ -487,8 +501,8 @@ program studentpack
        /,' to appear.',/)
 8020 format(' Trial = ',I4,' Min Dist (best = ',F12.8,') = ',F12.8, &
           ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
-8030 format(/,A12,1X,A12,1X,A5,1X,A5,1X,A7,1X,A7,1X,A7,1X,A7)
-8031 format(F12.8,1X,F12.8,1X,I5,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
+8030 format(/,A12,1X,A5,1X,A12,1X,A5,1X,A12,1X,A5,1X,A7,1X,A7,1X,A7,1X,A7)
+8031 format(F12.8,1X,I5,1X,F12.8,1X,I5,1X,F12.8,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
 
 end program studentpack
 
