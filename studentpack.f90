@@ -452,11 +452,11 @@ program studentpack
   end if
 
   do i = 1, nmem
-     if (maxmindist(i) .gt. bstsol) then
-        bstsol = maxmindist(i)
+     if (xb(n,i) .gt. bstsol) then
+        bstsol = xb(n,i)
         ibstsol = btrial(i)
      end if
-     if (btrial(i) .eq. imaxdist) omaxdist = maxmindist(i)
+     if (btrial(i) .eq. imaxdist) omaxdist = xb(n,i)
   end do
 
   call CPU_TIME(tend)
