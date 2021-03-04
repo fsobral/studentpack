@@ -388,7 +388,7 @@ program studentpack
   do j = 1,nmem
   
      equatn(1) = .true.
-     lambda(1) = PEN * overlap(n,xb(1:n,j))
+     lambda(1) = 0.0
      linear(1) = .false.
 
      ! Coded subroutines
