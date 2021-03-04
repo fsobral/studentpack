@@ -50,7 +50,7 @@ program studentpack
        dtimemd,maxdist,omaxdist,bstsol
 
   ! FUNCTIONS
-  real(kind=8) :: maxaloc,minover,overlap
+  real(kind=8) :: maxaloc,minover
   
   ! EXTERNAL SUBROUTINES
   external :: myevalf,myevalg,myevalh,myevalfu,myevalgu,myevalhu, &
@@ -474,8 +474,10 @@ program studentpack
 
 6002 continue
   
-  write(*,8030) 'BSOL','IBSOL','MAXD','IMAXD','MAXDO','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
-  write(*,8031) bstsol,ibstsol,maxdist,imaxdist,omaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
+  write(*,8030) 'MDIST','CW','CH','RW','RH','NITEM', &
+                'BSOL','IBSOL','MAXD','IMAXD','MAXDO','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
+  write(*,8031) MINDIST,cW,cH,W,H,nite, &
+                bstsol,ibstsol,maxdist,imaxdist,omaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
 
   ! Free structures
   
@@ -501,8 +503,10 @@ program studentpack
        /,' to appear.',/)
 8020 format(' Trial = ',I4,' Min Dist (best = ',F12.8,') = ',F12.8, &
           ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
-8030 format(/,A12,1X,A5,1X,A12,1X,A5,1X,A12,1X,A5,1X,A7,1X,A7,1X,A7,1X,A7)
-8031 format(F12.8,1X,I5,1X,F12.8,1X,I5,1X,F12.8,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
+8030 format(/,A6,1X,A6  ,1X,A6  ,1X,A6  ,1X,A6  ,1X,A5,1X, &
+            A12  ,1X,A5,1X,A12  ,1X,A5,1X,A12  ,1X,A5,1X,A7  ,1X,A7  ,1X,A7  ,1X,A7  )
+8031 format(F6.2,1X,F6.2,1X,F6.2,1X,F6.2,1X,F6.2,1X,I5,1X, &
+            F12.8,1X,I5,1X,F12.8,1X,I5,1X,F12.8,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
 
 end program studentpack
 
