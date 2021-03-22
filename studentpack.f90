@@ -249,8 +249,10 @@ program studentpack
   vparam(1) = 'LARGEST-PENALTY-PARAMETER-ALLOWED 1.0D+50'
   vparam(2) = 'PENALTY-PARAMETER-INITIAL-VALUE 1.0D+1'
   vparam(3) = 'OBJECTIVE-AND-CONSTRAINTS-SCALING-AVOIDED'
+  vparam(4) = 'ITERATIONS-OUTPUT-DETAIL 00'
+  vparam(5) = 'INNER-ITERATIONS-LIMIT 2000'
   
-  nvparam = 3
+  nvparam = 5
 
   ! OPTIMIZE THE BOX-CONSTRAINED PENALIZED PROBLEM
 
@@ -385,6 +387,9 @@ program studentpack
   efacc     = sqrt( epsfeas )
   eoacc     = sqrt( epsopt )
 
+  ! Remove the iteration limit for Gencan (use default)
+  nvparam = 4
+  
   do j = 1,nmem
   
      equatn(1) = .true.
