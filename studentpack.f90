@@ -612,180 +612,184 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
   unite = CEILING(W * H / (ACOS(-1.0D0) * (MINDIST / 2.0D0) ** 2))
   lnite = (FLOOR(W / MINDIST) + 1) * (FLOOR(H / MINDIST) + 1)
   
-8000 nite = INT((lnite + unite) / 2)
+  do nite = lnite, unite
 
-  allocate(diagb(ndim,ndim,nite),next(nite))
+     allocate(diagb(ndim,ndim,nite),next(nite))
   
-  if ( unite - lnite .le. 1 ) goto 9000
-
-  ! Number of variables
+     ! Number of variables
   
-  n = 2 * nite + 1
+     n = 2 * nite + 1
 
-  ! Set lower bounds, upper bounds, and initial guess
+     ! Set lower bounds, upper bounds, and initial guess
+     
+     allocate(x(n),stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Allocation error in subroutine findgnite.'
+        stop
+     end if
 
-  allocate(x(n),stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Allocation error in subroutine findgnite.'
-     stop
-  end if
+     ! Rows
+     if ( ptype .eq. 4 ) then
 
-  ! Rows
-  if ( ptype .eq. 4 ) then
+        call generate_x(x, n, W, H, cH, cW, nite)
 
-     call generate_x(x, n, W, H, cH, cW, nite)
+        if ( x(n) .lt. MINDIST - ERR ) then
 
-     if ( x(n) .lt. MINDIST - ERR ) then
-
-        write(*,9050) nite, 0
-        unite = nite
+           write(*,9050) nite, 0
+           goto 8100
         
-     else
+        else
 
-        write(*,9051) nite,0,0.0D0,0.0D0
-        lnite = nite
+           write(*,9051) nite,0,0.0D0,0.0D0
 
-        ! Save successful solution
-        if ( ALLOCATED(tmpx) ) then
-           deallocate(tmpx,stat=allocerr)
+           ! Save successful solution
+           if ( ALLOCATED(tmpx) ) then
+              deallocate(tmpx,stat=allocerr)
+              if ( allocerr .ne. 0 ) then
+                 write(*,*) 'Deallocation error in subroutine findgnite.'
+                 stop
+              end if
+           end if
+           allocate(tmpx(n),stat=allocerr)
            if ( allocerr .ne. 0 ) then
-              write(*,*) 'Deallocation error in subroutine findgnite.'
+              write(*,*) 'Allocation error in subroutine findgnite.'
               stop
            end if
+           tmpx = x
+           
         end if
-        allocate(tmpx(n),stat=allocerr)
-        if ( allocerr .ne. 0 ) then
-           write(*,*) 'Allocation error in subroutine findgnite.'
-           stop
+        
+        goto 8100
+     end if
+  
+     ! Constraints
+
+     m = 0
+     
+     allocate(l(n),u(n),equatn(m),linear(m),lambda(m),stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Allocation error in subroutine findgnite.'
+        stop
+     end if
+     
+     ! We assume that the right part of the room IS NOT a wall
+     do i = 1,nite
+        l(2 * i - 1) = cW / 2.0D0
+        u(2 * i - 1) = W
+        l(2 * i)     = cH / 2.0D0
+        u(2 * i)     = H - cH / 2.0D0
+     end do
+     
+     l(n) = max(MINDIST, sqrt(cW **2 + cH ** 2) / 2.0D0)
+     u(n) = 1.5D0 * sqrt(W **2 + H ** 2)
+     
+     ! Coded subroutines
+     
+     coded(1:3)  = .true.  ! fsub, gsub, hsub, csub, jacsub, hcsub
+     coded(4:11) = .false. ! fcsub,gjacsub,gjacpsub,hlsub,hlpsub
+     
+     ! Upper bounds on the number of sparse-matrices non-null elements
+     
+     jcnnzmax = 0
+     hnnzmax  = ((nite + nfix) * ((nite + nfix) + 1) / 2) * &
+          ndim * (ndim + 3) + &
+          (nite + nfix) * (ndim * (ndim + 1) / 2) + 1
+     
+     ! Checking derivatives?
+     
+     checkder = .false.
+     
+     ! Parameters setting
+     
+     epsfeas   = 1.0d-02
+     epsopt    = 1.0d-02
+     
+     efstain   = sqrt( epsfeas )
+     eostain   = epsopt ** 1.5d0
+     
+     efacc     = sqrt( epsfeas )
+     eoacc     = sqrt( epsopt )
+     
+     outputfnm = ''
+     specfnm   = ''
+     
+     vparam(1) = 'LARGEST-PENALTY-PARAMETER-ALLOWED 1.0D+50'
+     vparam(2) = 'PENALTY-PARAMETER-INITIAL-VALUE 1.0D+1'
+     vparam(3) = 'OBJECTIVE-AND-CONSTRAINTS-SCALING-AVOIDED'
+     
+     nvparam   = 3
+     
+     ! OPTIMIZE THE BOX-CONSTRAINED PENALIZED PROBLEM
+     
+     do ntrial = 1,ntrials
+        
+        
+        if (ntrial .eq. 1) then
+           call generate_x(x, n, W, H, ch, cw, nite)
+           ! Comentario
+           ! Da pra mudar o programa do Thiago pra ele sair mais rapido no findgnite
+           if (x(n) .ge. MINDIST - ERR) exit
+           call perturbation_x(x,n,nite,perturb) 
+        else
+           
+           seed = 123456789.0D0 + ntrial
+           call RANDOM_SEED(PUT=seed)
+           
+           call RANDOM_NUMBER(x)
+           do i = 1, n
+              x(i) = l(i) + x(i) * (u(i) - l(i))
+           end do
         end if
-        tmpx = x
+        ! Fim Mudanca Felipe
+        
+        call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac, &
+             myevalhc,myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,&
+             jcnnzmax,hnnzmax,epsfeas,epsopt,efstain,eostain,efacc,eoacc,&
+             outputfnm,specfnm,nvparam,vparam,n,x,l,u,m,lambda,equatn,   &
+             linear,coded,checkder,f,cnorm,snorm,nlpsupn,inform)
+        
+        ! TEST SOLUTION
+        vover = minover(n,x)
+        x(n)  = vover
+        mxaloc = maxaloc(n,x,l,u)
+        
+        if ( vover .ge. MINDIST - ERR .and. mxaloc .le. ERR ) exit
+        
+     end do
+     
+     deallocate(l,u,lambda,equatn,linear,stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Deallocation error in subroutine findgnite.'
+        stop
+     end if
+     
+     if ( ntrial .gt. ntrials ) then
+        
+        write(*,9050) nite,ntrials
+
+     else
+        
+        write(*,9051) nite,ntrial,vover,mxaloc
         
      end if
 
-     goto 8100
-  end if
-  
-  ! Constraints
-
-  m = 0
-
-  allocate(l(n),u(n),equatn(m),linear(m),lambda(m),stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Allocation error in subroutine findgnite.'
-     stop
-  end if
-
-  ! We assume that the right part of the room IS NOT a wall
-  do i = 1,nite
-     l(2 * i - 1) = cW / 2.0D0
-     u(2 * i - 1) = W
-     l(2 * i)     = cH / 2.0D0
-     u(2 * i)     = H - cH / 2.0D0
-  end do
-
-  l(n) = max(MINDIST, sqrt(cW **2 + cH ** 2) / 2.0D0)
-  u(n) = 1.5D0 * sqrt(W **2 + H ** 2)
-
-  ! Coded subroutines
-
-  coded(1:3)  = .true.  ! fsub, gsub, hsub, csub, jacsub, hcsub
-  coded(4:11) = .false. ! fcsub,gjacsub,gjacpsub,hlsub,hlpsub
-
-  ! Upper bounds on the number of sparse-matrices non-null elements
-
-  jcnnzmax = 0
-  hnnzmax  = ((nite + nfix) * ((nite + nfix) + 1) / 2) * &
-       ndim * (ndim + 3) + &
-       (nite + nfix) * (ndim * (ndim + 1) / 2) + 1
-
-  ! Checking derivatives?
-
-  checkder = .false.
-
-  ! Parameters setting
-
-  epsfeas   = 1.0d-02
-  epsopt    = 1.0d-02
-
-  efstain   = sqrt( epsfeas )
-  eostain   = epsopt ** 1.5d0
-
-  efacc     = sqrt( epsfeas )
-  eoacc     = sqrt( epsopt )
-
-  outputfnm = ''
-  specfnm   = ''
-
-  vparam(1) = 'LARGEST-PENALTY-PARAMETER-ALLOWED 1.0D+50'
-  vparam(2) = 'PENALTY-PARAMETER-INITIAL-VALUE 1.0D+1'
-  vparam(3) = 'OBJECTIVE-AND-CONSTRAINTS-SCALING-AVOIDED'
-  
-  nvparam   = 3
-
-  ! OPTIMIZE THE BOX-CONSTRAINED PENALIZED PROBLEM
-
-  do ntrial = 1,ntrials
-
-
-     if (ntrial .eq. 1) then
-        call generate_x(x, n, W, H, ch, cw, nite)
-        ! Comentario
-        ! Da pra mudar o programa do Thiago pra ele sair mais rapido no findgnite
-        if (x(n) .ge. MINDIST - ERR) exit
-	call perturbation_x(x,n,nite,perturb) 
-     else
-  
-  	seed = 123456789.0D0 + ntrial
-     	call RANDOM_SEED(PUT=seed)
-  
-  	call RANDOM_NUMBER(x)
-     	do i = 1, n
-           x(i) = l(i) + x(i) * (u(i) - l(i))
-        end do
-     end if
-    ! Fim Mudanca Felipe
-
-     call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac, &
-     myevalhc,myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,&
-     jcnnzmax,hnnzmax,epsfeas,epsopt,efstain,eostain,efacc,eoacc,&
-     outputfnm,specfnm,nvparam,vparam,n,x,l,u,m,lambda,equatn,   &
-     linear,coded,checkder,f,cnorm,snorm,nlpsupn,inform)
+8100 vover = x(n)
      
-     ! TEST SOLUTION
-     vover = minover(n,x)
-     mxaloc = maxaloc(n,x,l,u)
+     deallocate(x,diagb,next,stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Deallocation error in subroutine findgnite.'
+        stop
+     end if
 
-     if ( vover .ge. MINDIST - ERR .and. mxaloc .le. ERR ) exit
-
+     if (vover .lt. MINDIST - ERR) then
+        exit
+     end if
+  
   end do
 
-  deallocate(l,u,lambda,equatn,linear,stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Deallocation error in subroutine findgnite.'
-     stop
-  end if
+  nite = nite - 1
 
-  if ( ntrial .gt. ntrials ) then
-
-     write(*,9050) nite,ntrials
-     unite = nite
-
-  else
-
-     write(*,9051) nite,ntrial,vover,mxaloc
-     lnite = nite
-
-  end if
-
-8100 deallocate(x,diagb,next,stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Deallocation error in subroutine findgnite.'
-     stop
-  end if
-  
-  goto 8000
-
-9000 return
+  return
 
 9050 format('No packing for ',I4,' chairs. Trials: ',I5)
 9051 format('Found packing for ',I4,' chairs. Trials: ',I5,&
