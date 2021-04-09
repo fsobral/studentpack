@@ -577,7 +577,7 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
   ! that can be packed inside the given region. The value 'nite' is
   ! updated in the global scalar 'nite' in module 'packmod'.
   
-  use packmod, only: ndim,nfix,nite,cH,cW,ERR,next,frad,diagb
+  use packmod, only: ndim,nfix,nite,cH,cW,ERR,next,diagb
 
   implicit none
 
@@ -603,14 +603,14 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
 
   ! LOCAL SCALARS
   integer      :: i,lnite,unite,ntrial
-  real(kind=8) :: farea,minover,vover,mxaloc,maxaloc
+  real(kind=8) :: minover,vover,mxaloc,maxaloc
 
   ! EXTERNAL SUBROUTINES
   external :: myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc,&
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp
 
   unite = CEILING(W * H / (ACOS(-1.0D0) * (MINDIST / 2.0D0) ** 2))
-  lnite = (FLOOR(W / MINDIST) + 1) * (FLOOR(H / MINDIST) + 1)
+  lnite = (FLOOR((W - cW / 2.0D0) / MINDIST) + 1) * (FLOOR((H - cH) / MINDIST) + 1)
   
 8000 nite = INT((lnite + unite) / 2)
 
