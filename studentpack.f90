@@ -609,14 +609,8 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
   external :: myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc,&
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp
 
-  ! We assume that the lower bound is feasible
-  farea = W * H
-  do i = 1,nfix
-     farea = farea - ACOS(-1.0D0) * frad(i) ** 2
-  end do
-  
-  unite = CEILING(W * H / (ACOS(-1.0D0) * (MINDIST / 3.0D0) ** 2))
-  lnite = INT(farea / (ACOS(-1.0D0) * (MINDIST) ** 2))
+  unite = CEILING(W * H / (ACOS(-1.0D0) * (MINDIST / 2.0D0) ** 2))
+  lnite = (FLOOR(W / MINDIST) + 1) * (FLOOR(H / MINDIST) + 1)
   
 8000 nite = INT((lnite + unite) / 2)
 
