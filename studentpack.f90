@@ -609,8 +609,10 @@ subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
   external :: myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc,&
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp
 
-  unite = CEILING(W * H / (ACOS(-1.0D0) * (MINDIST / 2.0D0) ** 2))
+  unite = CEILING(W * (H + MINDIST) / (ACOS(-1.0D0) * (MINDIST / 2.0D0) ** 2))
   lnite = (FLOOR((W - cW / 2.0D0) / MINDIST) + 1) * (FLOOR((H - cH) / MINDIST) + 1)
+
+  write(*,*) unite, lnite
   
   do nite = lnite, unite
 
