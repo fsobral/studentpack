@@ -9,3 +9,5 @@ solution.*
 initpoint.txt
 *.tex
 *.out
+
+__pycache__
