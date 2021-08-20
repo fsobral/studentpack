@@ -5,8 +5,7 @@ program studentpack
   implicit none
 
   ! PARAMETERS
-  character(len=15) :: LTEXSOL = 'solution.tex', &
-                       JSONSOL = 'solution.json'
+  character(len=15) :: JSONSOL = 'solution.json'
   integer           :: MAXMEM = 5
   real(kind=8)      :: PERTURBATION = 0.1D0
   
