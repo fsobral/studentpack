@@ -45,7 +45,7 @@ program studentpack
   
   ! LOCAL SCALARS
   integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem,MAXMEMOLD, &
-       imaxdist,nsuctrials,ibstsol
+       imaxdist,nsuctrials,ibstsol,nfmem,ninfmem
   real(kind=8) :: H,vover,valoc,W,tstart,tend,dtimef,dtimei,dtimeo, &
        dtimemd,maxdist,omaxdist,bstsol
 
@@ -259,7 +259,9 @@ program studentpack
   btrial     = 0
   maxmindist = 0.0D0
   nmem       = 0
-
+  nfmem      = 0
+  ninfmem    = 0
+  
   ! Vamos devolver a solucao em filas como uma opcao se possivel
   MAXMEMOLD = MAXMEM
 
@@ -306,10 +308,10 @@ program studentpack
      !write(*,*) 'VALOR DE VOVER: ', vover
 
      
-     if ( vover .ge. MINDIST - ERR .and. valoc .le. ERR) then
+     if ( valoc .le. ERR) then
 
         ! Statistics
-        nsuctrials = nsuctrials + 1
+        if ( vover .ge. MINDIST - ERR ) nsuctrials = nsuctrials + 1
         if ( vover .gt. maxdist + ERR ) then
            maxdist  = vover
            imaxdist = ntrial
@@ -318,6 +320,14 @@ program studentpack
         end if
 
         call packsort(n,x,nite,ndim)
+        ! Ignore infeasible solutions if there is at least one
+        ! feasible
+        if ( vover .lt. MINDIST - ERR .and. nfmem .gt. 0 ) goto 10
+        ! Discard infeasible solutions if found a feasible one
+        if ( vover .ge. MINDIST - ERR .and. nfmem .eq. 0 ) then
+           nmem = 0
+           ninfmem = 0
+        end if
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
                 ( nmem .lt. MAXMEM .and. &
@@ -345,19 +355,20 @@ program studentpack
            btrial(1)     = ntrial
            nmem          = nmem + 1
         end if
+        ! Update memory information
+        if ( vover .ge. MINDIST ) then
+           nfmem = nmem
+        else
+           ninfmem = nmem
+        end if
      end if
 
-     write(*,8020) ntrial,maxmindist(1),vover,x(n),valoc
+10   write(*,8020) ntrial,maxmindist(1),vover,x(n),valoc,nfmem,ninfmem
   
   end do
 
   call CPU_TIME(tend)
   dtimei = tend - tstart
-  
-  if ( nmem .eq. 0 .and. MAXMEM .eq. MAXMEMOLD ) then
-     call tojson(n,nmem,xb,nite,W,H,JSONSOL,.false.)
-     goto 6002
-  end if
   
   ! RUN CONSTRAINED PROBLEM
 
@@ -419,7 +430,7 @@ program studentpack
 
      xb(n,j) = vover
      
-     write(*,8020) btrial(j),maxmindist(j),vover,xb(n,j),valoc
+     write(*,8021) btrial(j),maxmindist(j),vover,xb(n,j),valoc
 
   end do
 
@@ -469,7 +480,7 @@ program studentpack
   
 6001 continue
   
-  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
+  call drawsol(nite,W,H,n,nmem,MINDIST,xb(1:n,1:nmem),LTEXSOL)
   
   if (nmem .eq. 0) then
      call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.false.)
@@ -477,8 +488,6 @@ program studentpack
      call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
   end if
 
-6002 continue
-  
   write(*,8030) 'MDIST','CW','CH','RW','RH','NITEM', &
                 'BSOL','IBSOL','MAXD','IMAXD','MAXDO','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
   write(*,8031) MINDIST,cW,cH,W,H,nite, &
@@ -506,8 +515,10 @@ program studentpack
        /,' This program uses ALGENCAN and the strategy',          &
        ' described in:',/                                       &
        /,' to appear.',/)
-8020 format(' Trial = ',I4,' Min Dist (best = ',F12.8,') = ',F12.8, &
-          ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
+8020 format(' Trial = ',I4,' MinDst(best=',F12.8,') = ',F12.8, &
+       ' Fobj = ',1P,D9.1,' BoxFeas = ',1P,D9.1,' FS= ',I2,' IS= ',I2)
+8021 format(' Trial = ',I4,' MinDst(best=',F12.8,') = ',F12.8, &
+       ' Fobj = ',1P,D9.1,' BoxFeas = ',1P,D9.1)
 8030 format(/,A6,1X,A6  ,1X,A6  ,1X,A6  ,1X,A6  ,1X,A5,1X, &
             A12  ,1X,A5,1X,A12  ,1X,A5,1X,A12  ,1X,A5,1X,A7  ,1X,A7  ,1X,A7  ,1X,A7  )
 8031 format(F6.2,1X,F6.2,1X,F6.2,1X,F6.2,1X,F6.2,1X,I5,1X, &
@@ -926,7 +937,7 @@ end function maxaloc
 !     ******************************************************
 !     ******************************************************
 
-subroutine drawsol(nite,W,H,n,nmem,x,solfile)
+subroutine drawsol(nite,W,H,n,nmem,MINDIST,x,solfile)
 
   use packmod, only: nfix,fcoord,frad
 
@@ -937,7 +948,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
 
   !     SCALAR ARGUMENTS
   integer, intent(in)      :: n,nite,nmem
-  real(kind=8), intent(in) :: W,H
+  real(kind=8), intent(in) :: W,H,MINDIST
 
   !     ARRAY ARGUMENTS
   real(kind=8), intent(in)      :: x(n,nmem)
@@ -947,6 +958,9 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
   integer :: i,j
   real(kind=8) :: scale,radius
 
+  ! FUNCTIONS
+  real(kind=8) :: minover
+
   open(unit=10,file=solfile)
 
   write(10,01)
@@ -955,8 +969,8 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
 
      if ( j .gt. 1 ) write(10,12)
 
-     radius = x(n,j) / 2.0D0
-	 
+     radius = max(minover(n,x(1:n,j)), MINDIST) / 2.0D0
+  
      ! SCALING
      scale = min(20.0D0 / (H + 2.0D0) * radius, &
                  10.0D0 / (W + 2.0D0 * radius))
@@ -1031,6 +1045,9 @@ subroutine tojson(n,nmem,x,nite,W,H,solfile,foundsol)
   ! LOCAL SCALARS
   integer :: i,j
 
+  ! FUNCTIONS
+  real(kind=8) :: minover
+
   open(unit=10,file=solfile)
 
   if ( .not. foundsol ) then
@@ -1039,12 +1056,12 @@ subroutine tojson(n,nmem,x,nite,W,H,solfile,foundsol)
   end if
 
   ! CLASSROOM
-  write(10,10) nite,x(n,1),W,H
+  write(10,10) nite,minover(n, x(:,1)),W,H
 
   do j = 1,nmem
      
      ! CIRCULAR ITEMS
-     write(10,11) x(n,j)
+     write(10,11) minover(n, x(:,j))
      do i = 1,nite - 1
         write(10,20) x(2*i-1,j),x(2*i,j)
      end do
