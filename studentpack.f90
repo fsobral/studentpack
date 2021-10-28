@@ -168,11 +168,21 @@ program studentpack
 
   ! Rows
 
+  nmem    = 0
+  nfmem   = 0
+  ninfmem = 0
+  
   if ( ptype .eq. 4 ) then
 
+     ! Store the solution, regardless it is feasible or infeasible
+     nmem       = 1
+     xb(1:n, 1) = tmpx
+     ! This measure is correct for the infeasible case, since the
+     ! heuristic always reduce the radius to adjust the circles
      if (tmpx(n) .gt. MINDIST - ERR) then
-        xb(1:n, 1) = tmpx
-        nmem = 1
+        nfmem = nmem
+     else
+        ninfmem = 1
      end if
 
      ! We need to deallocate tmpx that was used for findgnite with
@@ -188,12 +198,22 @@ program studentpack
   
   if ( ptype .eq. 3 ) then
      call generate_x(x, n, W, H, cH, cW, nite)
+     ! Store the solution, regardless it is feasible or infeasible
+     xb(1:n, 1) = x
+     nmem       = 1
+     ! This measure is correct for the infeasible case, since the
+     ! heuristic always reduce the radius to adjust the circles
      if (x(n) .gt. MINDIST - ERR) then
-        xb(1:n, 1) = x
-        nmem = 1
+        nfmem = nmem
+     else
+        ninfmem = nmem
      end if
      goto 6001
   end if
+
+  ! -------------------------------
+  ! Truncated Penalization Strategy
+  ! -------------------------------
   
   ! We assume that the right part of the room  is NOT a wall
   do i = 1,nite
@@ -272,11 +292,11 @@ program studentpack
         ! Aqui daria pra dar uma quantidade de tentativas pro Thiago
         call generate_x(xlin, n, W, H, ch, cw, nite)
         if (nite .eq. 1) xlin(n) = MINDIST
-        if (xlin(n) .ge. MINDIST - ERR .and. MAXMEM .gt. 1) then
-           MAXMEM = MAXMEM - 1
+        ! if (xlin(n) .ge. MINDIST - ERR .and. MAXMEM .gt. 1) then
+        ! Feasibility does not need to be checked here
+        if (MAXMEM .gt. 1) MAXMEM = MAXMEM - 1
         !uma opcao eh  xlin, mesmo que pior entao eu vou guardar
         !uma solucao de ALGENCAN a menos
-        end if
         x(:) = xlin(:)
         call perturbation_x(x,n,nite,PERTURBATION) 
 	!Comentario Felipe
@@ -289,7 +309,6 @@ program studentpack
            x(i) = l(i) + x(i) * (u(i) - l(i))
         end do
      end if
-
 
      call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc, &
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,jcnnzmax, &
@@ -307,8 +326,8 @@ program studentpack
      ! Thiago perturbada
      !write(*,*) 'VALOR DE VOVER: ', vover
 
-     
-     if ( valoc .le. ERR) then
+     ! Ignore cases where two circles overlap
+     if ( vover .gt. ERR .and. valoc .le. ERR ) then
 
         ! Statistics
         if ( vover .ge. MINDIST - ERR ) nsuctrials = nsuctrials + 1
@@ -319,7 +338,6 @@ program studentpack
            dtimemd = tend - tstart
         end if
 
-        call packsort(n,x,nite,ndim)
         ! Ignore infeasible solutions if there is at least one
         ! feasible
         if ( vover .lt. MINDIST - ERR .and. nfmem .gt. 0 ) goto 10
@@ -327,7 +345,11 @@ program studentpack
         if ( vover .ge. MINDIST - ERR .and. nfmem .eq. 0 ) then
            nmem = 0
            ninfmem = 0
+           ! Discard heuristic solution if infeasible
+           if ( xlin(n) .lt. MINDIST - ERR ) MAXMEM = MAXMEMOLD
         end if
+
+        call packsort(n,x,nite,ndim)
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
                 ( nmem .lt. MAXMEM .and. &
@@ -355,7 +377,7 @@ program studentpack
            btrial(1)     = ntrial
            nmem          = nmem + 1
         end if
-        ! Update memory information
+        ! Update memory information to feasible and infeasible cases
         if ( vover .ge. MINDIST ) then
            nfmem = nmem
         else
@@ -465,6 +487,12 @@ program studentpack
         end do
      end if
      nmem = nmem + 1
+     ! Update feasibility information for xlin
+     if ( xlin(n) .ge. MINDIST - ERR ) then
+        nfmem = nmem
+     else
+        ninfmem = nmem
+     end if
   end if
 
   do i = 1, nmem
@@ -939,7 +967,7 @@ end function maxaloc
 
 subroutine drawsol(nite,W,H,n,nmem,MINDIST,x,solfile)
 
-  use packmod, only: nfix,fcoord,frad
+  use packmod, only: nfix,fcoord,frad,ERR
 
   implicit none
   
@@ -969,7 +997,7 @@ subroutine drawsol(nite,W,H,n,nmem,MINDIST,x,solfile)
 
      if ( j .gt. 1 ) write(10,12)
 
-     radius = max(minover(n,x(1:n,j)), MINDIST) / 2.0D0
+     radius = max(minover(n,x(1:n,j)), ERR) / 2.0D0
   
      ! SCALING
      scale = min(20.0D0 / (H + 2.0D0) * radius, &
