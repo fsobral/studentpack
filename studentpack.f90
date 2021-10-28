@@ -8,6 +8,7 @@ program studentpack
   character(len=15) :: LTEXSOL = 'solution.tex', &
                        JSONSOL = 'solution.json'
   integer           :: MAXMEM = 5
+  real(kind=8)      :: PERTURBATION = 0.1D0
   
   ! LOCAL SCALARS
   logical      :: checkder
@@ -19,15 +20,37 @@ program studentpack
   character(len=80)     :: specfnm,outputfnm,vparam(10)
   logical               :: coded(11)
   logical,      pointer :: equatn(:),linear(:)
-  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),maxmindist(:)
+  real(kind=8), pointer :: l(:),lambda(:),u(:),x(:),xb(:,:),maxmindist(:),xlin(:)
+  real(kind=8), allocatable :: tmpx(:)
   integer     , pointer :: seed(:),btrial(:)
 
+  interface
+     subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
+       implicit none
+       ! SCALAR ARGUMENTS
+       integer, intent(in) :: ntrials,ptype,ssize
+       real(kind=8), intent(in) :: H,MINDIST,W,perturb
+       !
+       ! ARRAY ARGUMENTS
+       real(kind=8), allocatable, intent(inout) :: tmpx(:)
+       integer, intent(inout) :: seed(ssize)
+       !
+       ! LOCAL SCALARS
+       logical      :: checkder
+       integer      :: allocerr,hnnzmax,inform,jcnnzmax,m,n,nvparam
+       real(kind=8) :: cnorm,efacc,efstain,eoacc,eostain,epsfeas,epsopt, &
+            f,nlpsupn,snorm
+     end subroutine findgnite
+  end interface
+  
   ! LOCAL SCALARS
-  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem
-  real(kind=8) :: H,vover,valoc,W
+  integer :: i,j,ntrial,ntrials,ptype,status,ssize,nmem,MAXMEMOLD, &
+       imaxdist,nsuctrials,ibstsol,nfmem,ninfmem
+  real(kind=8) :: H,vover,valoc,W,tstart,tend,dtimef,dtimei,dtimeo, &
+       dtimemd,maxdist,omaxdist,bstsol
 
   ! FUNCTIONS
-  real(kind=8) :: maxaloc,minover,overlap
+  real(kind=8) :: maxaloc,minover
   
   ! EXTERNAL SUBROUTINES
   external :: myevalf,myevalg,myevalh,myevalfu,myevalgu,myevalhu, &
@@ -71,12 +94,25 @@ program studentpack
 6000  write(*,*) 'Problem type: 1- Max radius 2- Max chairs'
   read(*,*) ptype
 
-  if ( ptype .ne. 1 .and. ptype .ne. 2 ) goto 6000
+  if ( ptype .ne. 1 .and. ptype .ne. 2 .and. &
+       ptype .ne. 3 .and. ptype .ne. 4 ) goto 6000     
 
-  if ( ptype .eq. 1) then
+  if ( ptype .eq. 1 .or. ptype .eq. 3 ) then
      write(*,*) 'Enter the number of chairs: '
      read(*,*) nite
   end if
+
+  ! INITIALIZE STATISTICS
+  maxdist    = 0.0d0
+  omaxdist   = 0.0d0
+  bstsol     = 0.0d0
+  imaxdist   = -1
+  ibstsol    = -1
+  nsuctrials = 0
+  dtimef  = 0.0d0
+  dtimei  = 0.0d0
+  dtimeo  = 0.0d0
+  dtimemd = 0.0d0
   
   ! INITIALIZE REGIONS
 
@@ -97,11 +133,16 @@ program studentpack
   br    = 0
   nbr   = 0
 
-  ! If problem type is 2, try to find the maximum number of chairs,
+  ! If problem type is 2 or 4, try to find the maximum number of chairs,
   ! respecting the minimum distance.
-  if ( ptype .eq. 2 ) then
-     call findgnite(W,H,ntrials,ssize,seed,MINDIST)
+  call CPU_TIME(tstart)
+  if ( ptype .eq. 2 .or. ptype .eq. 4 ) then
+     call findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,PERTURBATION)
   end if
+  call CPU_TIME(tend)
+  dtimef = tend - tstart
+
+  call CPU_TIME(tstart)
 
   ! Finish allocating the structure of regions
   
@@ -118,13 +159,62 @@ program studentpack
 
   ! Set lower bounds, upper bounds, and initial guess
 
-  allocate(x(n),l(n),u(n),xb(n,MAXMEM),btrial(MAXMEM), &
+  allocate(x(n),xlin(n),l(n),u(n),xb(n,MAXMEM),btrial(MAXMEM), &
            maxmindist(MAXMEM),stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Allocation error in main program'
      stop
   end if
 
+  ! Rows
+
+  nmem    = 0
+  nfmem   = 0
+  ninfmem = 0
+  
+  if ( ptype .eq. 4 ) then
+
+     ! Store the solution, regardless it is feasible or infeasible
+     nmem       = 1
+     xb(1:n, 1) = tmpx
+     ! This measure is correct for the infeasible case, since the
+     ! heuristic always reduce the radius to adjust the circles
+     if (tmpx(n) .gt. MINDIST - ERR) then
+        nfmem = nmem
+     else
+        ninfmem = 1
+     end if
+
+     ! We need to deallocate tmpx that was used for findgnite with
+     ! ptype = 4.
+     deallocate(tmpx,stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Deallocation error in main program.'
+        stop
+     end if
+     
+     goto 6001
+  end if
+  
+  if ( ptype .eq. 3 ) then
+     call generate_x(x, n, W, H, cH, cW, nite)
+     ! Store the solution, regardless it is feasible or infeasible
+     xb(1:n, 1) = x
+     nmem       = 1
+     ! This measure is correct for the infeasible case, since the
+     ! heuristic always reduce the radius to adjust the circles
+     if (x(n) .gt. MINDIST - ERR) then
+        nfmem = nmem
+     else
+        ninfmem = nmem
+     end if
+     goto 6001
+  end if
+
+  ! -------------------------------
+  ! Truncated Penalization Strategy
+  ! -------------------------------
+  
   ! We assume that the right part of the room  is NOT a wall
   do i = 1,nite
      l(2 * i - 1) = cW / 2.0D0
@@ -179,25 +269,47 @@ program studentpack
   vparam(1) = 'LARGEST-PENALTY-PARAMETER-ALLOWED 1.0D+50'
   vparam(2) = 'PENALTY-PARAMETER-INITIAL-VALUE 1.0D+1'
   vparam(3) = 'OBJECTIVE-AND-CONSTRAINTS-SCALING-AVOIDED'
+  vparam(4) = 'ITERATIONS-OUTPUT-DETAIL 00'
+  vparam(5) = 'INNER-ITERATIONS-LIMIT 2000'
   
-  nvparam = 3
+  nvparam = 5
 
   ! OPTIMIZE THE BOX-CONSTRAINED PENALIZED PROBLEM
 
   btrial     = 0
   maxmindist = 0.0D0
   nmem       = 0
+  nfmem      = 0
+  ninfmem    = 0
+  
+  ! Vamos devolver a solucao em filas como uma opcao se possivel
+  MAXMEMOLD = MAXMEM
 
   do ntrial = 1,ntrials
-  
-     seed = 123456789.0D0 + ntrial
-     call RANDOM_SEED(PUT=seed)
-  
-     call RANDOM_NUMBER(x)
-     do i = 1, n
-        x(i) = l(i) + x(i) * (u(i) - l(i))
-     end do
-  
+
+     ! Ponto inicial aproveitando Thiago   
+     if (ntrial .eq. 1) then
+        ! Aqui daria pra dar uma quantidade de tentativas pro Thiago
+        call generate_x(xlin, n, W, H, ch, cw, nite)
+        if (nite .eq. 1) xlin(n) = MINDIST
+        ! if (xlin(n) .ge. MINDIST - ERR .and. MAXMEM .gt. 1) then
+        ! Feasibility does not need to be checked here
+        if (MAXMEM .gt. 1) MAXMEM = MAXMEM - 1
+        !uma opcao eh  xlin, mesmo que pior entao eu vou guardar
+        !uma solucao de ALGENCAN a menos
+        x(:) = xlin(:)
+        call perturbation_x(x,n,nite,PERTURBATION) 
+	!Comentario Felipe
+        !Esta de acordo com o que eu penso entra xlin e sai x
+     else
+        seed = 123456789.0D0 + ntrial
+        call RANDOM_SEED(PUT=seed)
+        call RANDOM_NUMBER(x)
+        do i = 1, n
+           x(i) = l(i) + x(i) * (u(i) - l(i))
+        end do
+     end if
+
      call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc, &
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,jcnnzmax, &
        hnnzmax,epsfeas,epsopt,efstain,eostain,efacc,eoacc,outputfnm, &
@@ -206,13 +318,42 @@ program studentpack
 
      ! TEST SOLUTION
      vover = minover(n,x)
+     if (nite .eq. 1) vover = MINDIST
      valoc = maxaloc(n,x,l,u)
+     
+     x(n) = vover
+     ! Comentario Felipe: Bom pra gente ver se a solucao esta vindo da do 
+     ! Thiago perturbada
+     !write(*,*) 'VALOR DE VOVER: ', vover
 
-     if ( vover .ge. MINDIST .and. valoc .le. ERR) then
+     ! Ignore cases where two circles overlap
+     if ( vover .gt. ERR .and. valoc .le. ERR ) then
+
+        ! Statistics
+        if ( vover .ge. MINDIST - ERR ) nsuctrials = nsuctrials + 1
+        if ( vover .gt. maxdist + ERR ) then
+           maxdist  = vover
+           imaxdist = ntrial
+           call CPU_TIME(tend)
+           dtimemd = tend - tstart
+        end if
+
+        ! Ignore infeasible solutions if there is at least one
+        ! feasible
+        if ( vover .lt. MINDIST - ERR .and. nfmem .gt. 0 ) goto 10
+        ! Discard infeasible solutions if found a feasible one
+        if ( vover .ge. MINDIST - ERR .and. nfmem .eq. 0 ) then
+           nmem = 0
+           ninfmem = 0
+           ! Discard heuristic solution if infeasible
+           if ( xlin(n) .lt. MINDIST - ERR ) MAXMEM = MAXMEMOLD
+        end if
+
         call packsort(n,x,nite,ndim)
         do i = 1,nmem
            if ( ( vover .gt. maxmindist(i) + ERR ) .or. &
-                ( ABS(vover - maxmindist(i)) .le. ERR .and. &
+                ( nmem .lt. MAXMEM .and. &
+                  vover .gt. maxmindist(i) .and. &
                   MAXVAL(ABS(x(1:n) - xb(1:n,i))) .gt. ERR ) ) then
 
               if ( nmem .lt. MAXMEM ) nmem = nmem + 1
@@ -236,18 +377,24 @@ program studentpack
            btrial(1)     = ntrial
            nmem          = nmem + 1
         end if
+        ! Update memory information to feasible and infeasible cases
+        if ( vover .ge. MINDIST ) then
+           nfmem = nmem
+        else
+           ninfmem = nmem
+        end if
      end if
 
-     write(*,8020) ntrial,maxmindist(1),vover,x(n),valoc
+10   write(*,8020) ntrial,maxmindist(1),vover,x(n),valoc,nfmem,ninfmem
   
   end do
 
-  if ( nmem .eq. 0 ) then
-     call tojson(n,nmem,xb,nite,W,H,JSONSOL,.false.)
-     stop
-  end if
+  call CPU_TIME(tend)
+  dtimei = tend - tstart
   
   ! RUN CONSTRAINED PROBLEM
+
+  call CPU_TIME(tstart)
   
   deallocate(equatn,linear,lambda)
 
@@ -273,10 +420,13 @@ program studentpack
   efacc     = sqrt( epsfeas )
   eoacc     = sqrt( epsopt )
 
+  ! Remove the iteration limit for Gencan (use default)
+  nvparam = 4
+  
   do j = 1,nmem
   
      equatn(1) = .true.
-     lambda(1) = PEN * overlap(n,xb(1:n,j))
+     lambda(1) = 0.0
      linear(1) = .false.
 
      ! Coded subroutines
@@ -297,20 +447,83 @@ program studentpack
 
      ! TEST SOLUTION
      vover = minover(n,xb(1:n,j))
+     if (nite .eq. 1) vover = MINDIST
      valoc = maxaloc(n,xb(1:n,j),l,u)
 
-     write(*,8020) btrial(j),maxmindist(j),vover,xb(n,j),valoc
+     xb(n,j) = vover
+     
+     write(*,8021) btrial(j),maxmindist(j),vover,xb(n,j),valoc
 
   end do
 
-  call drawsol(nite,W,H,n,nmem,xb(1:n,1:nmem),LTEXSOL)
+  ! Free Algencan structure
+  deallocate(lambda,equatn,linear,stat=allocerr)
+  if ( allocerr .ne. 0 ) then
+     write(*,*) 'Deallocation error in main program'
+     stop
+  end if
 
-  call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
+  ! Devolvendo a solucao em fileiras como uma possibilidade
+  if (MAXMEM .lt. MAXMEMOLD) then
+     if (nmem .eq. 0) then
+        xb(:, 1) = xlin(:)
+     else if (xlin(n) .lt. xb(n,nmem)) then
+        xb(:,nmem + 1) = xlin
+        maxmindist(nmem + 1) = xlin(n)
+        btrial(nmem + 1) = 0 !0 indica a solucao do Thiago, sem Algencan
+     else
+        do i = 1,nmem
+           if (xlin(n) .ge. xb(n,i)) then           
+              do j = nmem+1,i + 1,-1
+                 xb(:,j) = xb(:,j - 1)
+                 maxmindist(j) = maxmindist(j - 1)
+                 btrial(j) = btrial(j - 1)
+              end do
+              xb(:,i) = xlin
+              maxmindist(i) = xlin(n)
+              btrial(i) = 0
+              exit
+           end if
+        end do
+     end if
+     nmem = nmem + 1
+     ! Update feasibility information for xlin
+     if ( xlin(n) .ge. MINDIST - ERR ) then
+        nfmem = nmem
+     else
+        ninfmem = nmem
+     end if
+  end if
+
+  do i = 1, nmem
+     if (xb(n,i) .gt. bstsol) then
+        bstsol = xb(n,i)
+        ibstsol = btrial(i)
+     end if
+     if (btrial(i) .eq. imaxdist) omaxdist = xb(n,i)
+  end do
+
+  call CPU_TIME(tend)
+  dtimeo = tend - tstart
+  
+6001 continue
+  
+  call drawsol(nite,W,H,n,nmem,MINDIST,xb(1:n,1:nmem),LTEXSOL)
+  
+  if (nmem .eq. 0) then
+     call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.false.)
+  else
+     call tojson(n,nmem,xb(1:n,1:nmem),nite,W,H,JSONSOL,.true.)
+  end if
+
+  write(*,8030) 'MDIST','CW','CH','RW','RH','NITEM', &
+                'BSOL','IBSOL','MAXD','IMAXD','MAXDO','NSTRI','TMAXD','TFIND','TTRI','TOPTI'
+  write(*,8031) MINDIST,cW,cH,W,H,nite, &
+                bstsol,ibstsol,maxdist,imaxdist,omaxdist,nsuctrials,dtimemd,dtimef,dtimei,dtimeo
 
   ! Free structures
   
-  deallocate(x,l,u,xb,maxmindist,btrial,lambda, &
-             equatn,linear,stat=allocerr)
+  deallocate(x,xlin,l,u,xb,maxmindist,btrial, stat=allocerr)
   if ( allocerr .ne. 0 ) then
      write(*,*) 'Deallocation error in main program'
      stop
@@ -330,8 +543,14 @@ program studentpack
        /,' This program uses ALGENCAN and the strategy',          &
        ' described in:',/                                       &
        /,' to appear.',/)
-8020 format(' Trial = ',I4,' Min Dist (best = ',F12.8,') = ',F12.8, &
-       ' Fobj = ',1P,D9.1,' Feasibility = ',1P,D9.1)
+8020 format(' Trial = ',I4,' MinDst(best=',F12.8,') = ',F12.8, &
+       ' Fobj = ',1P,D9.1,' BoxFeas = ',1P,D9.1,' FS= ',I2,' IS= ',I2)
+8021 format(' Trial = ',I4,' MinDst(best=',F12.8,') = ',F12.8, &
+       ' Fobj = ',1P,D9.1,' BoxFeas = ',1P,D9.1)
+8030 format(/,A6,1X,A6  ,1X,A6  ,1X,A6  ,1X,A6  ,1X,A5,1X, &
+            A12  ,1X,A5,1X,A12  ,1X,A5,1X,A12  ,1X,A5,1X,A7  ,1X,A7  ,1X,A7  ,1X,A7  )
+8031 format(F6.2,1X,F6.2,1X,F6.2,1X,F6.2,1X,F6.2,1X,I5,1X, &
+            F12.8,1X,I5,1X,F12.8,1X,I5,1X,F12.8,1X,I5,1X,F7.3,1X,F7.3,1X,F7.3,1X,F7.3)
 
 end program studentpack
 
@@ -391,21 +610,22 @@ end subroutine packsort
 !     ******************************************************
 !     ******************************************************
 
-subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
+subroutine findgnite(tmpx,W,H,ntrials,ssize,seed,MINDIST,ptype,perturb)
 
   ! This subroutine find the greatest value of the number of items
   ! that can be packed inside the given region. The value 'nite' is
   ! updated in the global scalar 'nite' in module 'packmod'.
   
-  use packmod, only: ndim,nfix,nite,cH,cW,ERR,next,frad,diagb
+  use packmod, only: ndim,nfix,nite,cH,cW,ERR,next,diagb
 
   implicit none
 
   ! SCALAR ARGUMENTS
-  integer, intent(in) :: ntrials,ssize
-  real(kind=8), intent(in) :: H,MINDIST,W
+  integer, intent(in) :: ntrials,ptype,ssize
+  real(kind=8), intent(in) :: H,MINDIST,W,perturb
 
   ! ARRAY ARGUMENTS
+  real(kind=8), allocatable, intent(inout) :: tmpx(:)
   integer, intent(inout) :: seed(ssize)
   
   ! LOCAL SCALARS
@@ -422,145 +642,194 @@ subroutine findgnite(W,H,ntrials,ssize,seed,MINDIST)
 
   ! LOCAL SCALARS
   integer      :: i,lnite,unite,ntrial
-  real(kind=8) :: farea,minover,vover,mxaloc,maxaloc
+  real(kind=8) :: minover,vover,mxaloc,maxaloc
 
   ! EXTERNAL SUBROUTINES
   external :: myevalfu,myevalgu,myevalhu,myevalc,myevaljac,myevalhc,&
        myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp
 
-  ! We assume that the lower bound is feasible
-  farea = W * H
-  do i = 1,nfix
-     farea = farea - ACOS(-1.0D0) * frad(i) ** 2
-  end do
+  unite = CEILING((W + MINDIST / 2.0D0) * (H + MINDIST) / &
+                  (ACOS(-1.0D0) * (MINDIST / 2.0D0) ** 2))
+  lnite = (FLOOR((W - cW / 2.0D0) / MINDIST) + 1) * (FLOOR((H - cH) / MINDIST) + 1)
+
+  do nite = lnite, unite
+
+     allocate(diagb(ndim,ndim,nite),next(nite))
   
-  unite = CEILING(W * H / (ACOS(-1.0D0) * (MINDIST / 3.0D0) ** 2))
-  lnite = INT(farea / (ACOS(-1.0D0) * (MINDIST) ** 2))
+     ! Number of variables
   
-8000 nite = INT((lnite + unite) / 2)
+     n = 2 * nite + 1
 
-  allocate(diagb(ndim,ndim,nite),next(nite))
-  
-  if ( unite - lnite .le. 1 ) goto 9000
-
-  ! Number of variables
-  
-  n = 2 * nite + 1
-
-  ! Set lower bounds, upper bounds, and initial guess
-
-  allocate(x(n),l(n),u(n),stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Allocation error in main program'
-     stop
-  end if
-
-  ! We assume that the right part of the room IS NOT a wall
-  do i = 1,nite
-     l(2 * i - 1) = cW / 2.0D0
-     u(2 * i - 1) = W
-     l(2 * i)     = cH / 2.0D0
-     u(2 * i)     = H - cH / 2.0D0
-  end do
-
-  l(n) = max(MINDIST, sqrt(cW **2 + cH ** 2) / 2.0D0)
-  u(n) = 1.5D0 * sqrt(W **2 + H ** 2)
-
-  ! Constraints
-
-  m = 0
-
-  allocate(equatn(m),linear(m),lambda(m),stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Allocation error in main program'
-     stop
-  end if
-
-  ! Coded subroutines
-
-  coded(1:3)  = .true.  ! fsub, gsub, hsub, csub, jacsub, hcsub
-  coded(4:11) = .false. ! fcsub,gjacsub,gjacpsub,hlsub,hlpsub
-
-  ! Upper bounds on the number of sparse-matrices non-null elements
-
-  jcnnzmax = 0
-  hnnzmax  = ((nite + nfix) * ((nite + nfix) + 1) / 2) * &
-       ndim * (ndim + 3) + &
-       (nite + nfix) * (ndim * (ndim + 1) / 2) + 1
-
-  ! Checking derivatives?
-
-  checkder = .false.
-
-  ! Parameters setting
-
-  epsfeas   = 1.0d-02
-  epsopt    = 1.0d-02
-
-  efstain   = sqrt( epsfeas )
-  eostain   = epsopt ** 1.5d0
-
-  efacc     = sqrt( epsfeas )
-  eoacc     = sqrt( epsopt )
-
-  outputfnm = ''
-  specfnm   = ''
-
-  vparam(1) = 'LARGEST-PENALTY-PARAMETER-ALLOWED 1.0D+50'
-  vparam(2) = 'PENALTY-PARAMETER-INITIAL-VALUE 1.0D+1'
-  vparam(3) = 'OBJECTIVE-AND-CONSTRAINTS-SCALING-AVOIDED'
-  
-  nvparam   = 3
-
-  ! OPTIMIZE THE BOX-CONSTRAINED PENALIZED PROBLEM
-
-  do ntrial = 1,ntrials
-
-     seed = 123456789.0D0 + ntrial
-     call RANDOM_SEED(PUT=seed)
-
-     call RANDOM_NUMBER(x)
-     do i = 1, n
-        x(i) = l(i) + x(i) * (u(i) - l(i))
-     end do
-
-     call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac, &
-     myevalhc,myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,&
-     jcnnzmax,hnnzmax,epsfeas,epsopt,efstain,eostain,efacc,eoacc,&
-     outputfnm,specfnm,nvparam,vparam,n,x,l,u,m,lambda,equatn,   &
-     linear,coded,checkder,f,cnorm,snorm,nlpsupn,inform)
+     ! Set lower bounds, upper bounds, and initial guess
      
-     ! TEST SOLUTION
-     vover = minover(n,x)
-     mxaloc = maxaloc(n,x,l,u)
+     allocate(x(n),stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Allocation error in subroutine findgnite.'
+        stop
+     end if
 
-     if ( vover .ge. MINDIST .and. mxaloc .le. ERR ) exit
+     ! Rows
+     if ( ptype .eq. 4 ) then
 
+        call generate_x(x, n, W, H, cH, cW, nite)
+
+        if ( x(n) .lt. MINDIST - ERR ) then
+
+           write(*,9050) nite, 0
+           goto 8100
+        
+        else
+
+           write(*,9051) nite,0,0.0D0,0.0D0
+
+           ! Save successful solution
+           if ( ALLOCATED(tmpx) ) then
+              deallocate(tmpx,stat=allocerr)
+              if ( allocerr .ne. 0 ) then
+                 write(*,*) 'Deallocation error in subroutine findgnite.'
+                 stop
+              end if
+           end if
+           allocate(tmpx(n),stat=allocerr)
+           if ( allocerr .ne. 0 ) then
+              write(*,*) 'Allocation error in subroutine findgnite.'
+              stop
+           end if
+           tmpx = x
+           
+        end if
+        
+        goto 8100
+     end if
+  
+     ! Constraints
+
+     m = 0
+     
+     allocate(l(n),u(n),equatn(m),linear(m),lambda(m),stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Allocation error in subroutine findgnite.'
+        stop
+     end if
+     
+     ! We assume that the right part of the room IS NOT a wall
+     do i = 1,nite
+        l(2 * i - 1) = cW / 2.0D0
+        u(2 * i - 1) = W
+        l(2 * i)     = cH / 2.0D0
+        u(2 * i)     = H - cH / 2.0D0
+     end do
+     
+     l(n) = max(MINDIST, sqrt(cW **2 + cH ** 2) / 2.0D0)
+     u(n) = 1.5D0 * sqrt(W **2 + H ** 2)
+     
+     ! Coded subroutines
+     
+     coded(1:3)  = .true.  ! fsub, gsub, hsub, csub, jacsub, hcsub
+     coded(4:11) = .false. ! fcsub,gjacsub,gjacpsub,hlsub,hlpsub
+     
+     ! Upper bounds on the number of sparse-matrices non-null elements
+     
+     jcnnzmax = 0
+     hnnzmax  = ((nite + nfix) * ((nite + nfix) + 1) / 2) * &
+          ndim * (ndim + 3) + &
+          (nite + nfix) * (ndim * (ndim + 1) / 2) + 1
+     
+     ! Checking derivatives?
+     
+     checkder = .false.
+     
+     ! Parameters setting
+     
+     epsfeas   = 1.0d-02
+     epsopt    = 1.0d-02
+     
+     efstain   = sqrt( epsfeas )
+     eostain   = epsopt ** 1.5d0
+     
+     efacc     = sqrt( epsfeas )
+     eoacc     = sqrt( epsopt )
+     
+     outputfnm = ''
+     specfnm   = ''
+     
+     vparam(1) = 'LARGEST-PENALTY-PARAMETER-ALLOWED 1.0D+50'
+     vparam(2) = 'PENALTY-PARAMETER-INITIAL-VALUE 1.0D+1'
+     vparam(3) = 'OBJECTIVE-AND-CONSTRAINTS-SCALING-AVOIDED'
+     
+     nvparam   = 3
+     
+     ! OPTIMIZE THE BOX-CONSTRAINED PENALIZED PROBLEM
+     
+     do ntrial = 1,ntrials
+        
+        
+        if (ntrial .eq. 1) then
+           call generate_x(x, n, W, H, ch, cw, nite)
+           ! Comentario
+           ! Da pra mudar o programa do Thiago pra ele sair mais rapido no findgnite
+           if (x(n) .ge. MINDIST - ERR) exit
+           call perturbation_x(x,n,nite,perturb) 
+        else
+           
+           seed = 123456789.0D0 + ntrial
+           call RANDOM_SEED(PUT=seed)
+           
+           call RANDOM_NUMBER(x)
+           do i = 1, n
+              x(i) = l(i) + x(i) * (u(i) - l(i))
+           end do
+        end if
+        ! Fim Mudanca Felipe
+        
+        call algencan(myevalfu,myevalgu,myevalhu,myevalc,myevaljac, &
+             myevalhc,myevalfc,myevalgjac,myevalgjacp,myevalhl,myevalhlp,&
+             jcnnzmax,hnnzmax,epsfeas,epsopt,efstain,eostain,efacc,eoacc,&
+             outputfnm,specfnm,nvparam,vparam,n,x,l,u,m,lambda,equatn,   &
+             linear,coded,checkder,f,cnorm,snorm,nlpsupn,inform)
+        
+        ! TEST SOLUTION
+        vover = minover(n,x)
+        x(n)  = vover
+        mxaloc = maxaloc(n,x,l,u)
+        
+        if ( vover .ge. MINDIST - ERR .and. mxaloc .le. ERR ) exit
+        
+     end do
+     
+     deallocate(l,u,lambda,equatn,linear,stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Deallocation error in subroutine findgnite.'
+        stop
+     end if
+     
+     if ( ntrial .gt. ntrials ) then
+        
+        write(*,9050) nite,ntrials
+
+     else
+        
+        write(*,9051) nite,ntrial,vover,mxaloc
+        
+     end if
+
+8100 vover = x(n)
+     
+     deallocate(x,diagb,next,stat=allocerr)
+     if ( allocerr .ne. 0 ) then
+        write(*,*) 'Deallocation error in subroutine findgnite.'
+        stop
+     end if
+
+     if (vover .lt. MINDIST - ERR) then
+        exit
+     end if
+  
   end do
 
-  deallocate(x,l,u,lambda,equatn,linear,stat=allocerr)
-  if ( allocerr .ne. 0 ) then
-     write(*,*) 'Deallocation error in main program'
-     stop
-  end if
+  nite = nite - 1
 
-  if ( ntrial .gt. ntrials ) then
-
-     write(*,9050) nite,ntrials
-     unite = nite
-
-  else
-
-     write(*,9051) nite,ntrial,vover,mxaloc
-     lnite = nite
-
-  end if
-
-  deallocate(diagb,next)
-  
-  goto 8000
-
-9000 return
+  return
 
 9050 format('No packing for ',I4,' chairs. Trials: ',I5)
 9051 format('Found packing for ',I4,' chairs. Trials: ',I5,&
@@ -696,9 +965,9 @@ end function maxaloc
 !     ******************************************************
 !     ******************************************************
 
-subroutine drawsol(nite,W,H,n,nmem,x,solfile)
+subroutine drawsol(nite,W,H,n,nmem,MINDIST,x,solfile)
 
-  use packmod, only: nfix,fcoord,frad
+  use packmod, only: nfix,fcoord,frad,ERR
 
   implicit none
   
@@ -707,7 +976,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
 
   !     SCALAR ARGUMENTS
   integer, intent(in)      :: n,nite,nmem
-  real(kind=8), intent(in) :: W,H
+  real(kind=8), intent(in) :: W,H,MINDIST
 
   !     ARRAY ARGUMENTS
   real(kind=8), intent(in)      :: x(n,nmem)
@@ -715,7 +984,10 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
 
   !     LOCAL SCALARS
   integer :: i,j
-  real(kind=8) :: scale,minover,radius
+  real(kind=8) :: scale,radius
+
+  ! FUNCTIONS
+  real(kind=8) :: minover
 
   open(unit=10,file=solfile)
 
@@ -725,7 +997,7 @@ subroutine drawsol(nite,W,H,n,nmem,x,solfile)
 
      if ( j .gt. 1 ) write(10,12)
 
-     radius = minover(n,x(1:n,j)) / 2.0D0
+     radius = max(minover(n,x(1:n,j)), ERR) / 2.0D0
   
      ! SCALING
      scale = min(20.0D0 / (H + 2.0D0) * radius, &
@@ -801,6 +1073,9 @@ subroutine tojson(n,nmem,x,nite,W,H,solfile,foundsol)
   ! LOCAL SCALARS
   integer :: i,j
 
+  ! FUNCTIONS
+  real(kind=8) :: minover
+
   open(unit=10,file=solfile)
 
   if ( .not. foundsol ) then
@@ -809,12 +1084,12 @@ subroutine tojson(n,nmem,x,nite,W,H,solfile,foundsol)
   end if
 
   ! CLASSROOM
-  write(10,10) nite,x(n,1),W,H
+  write(10,10) nite,minover(n, x(:,1)),W,H
 
   do j = 1,nmem
      
      ! CIRCULAR ITEMS
-     write(10,11) x(n,j)
+     write(10,11) minover(n, x(:,j))
      do i = 1,nite - 1
         write(10,20) x(2*i-1,j),x(2*i,j)
      end do
@@ -1706,3 +1981,477 @@ subroutine region(nregw,nregh,iterad,x,y,i,j)
   j = min( max( 1, j ), nregh )
 
 end subroutine region
+
+!     ******************************************************************
+!     ******************************************************************
+
+subroutine generate_x(x, n, W, H, ch, cw, A)
+  implicit none
+  integer :: i, j, caso  , lin(7), cox, coy, cb
+  ! n is the number of variables
+  ! A is the number of chairs
+  integer, intent(in) :: n, A
+  !x is the array with the points we will generate and give back
+  real(kind=8), intent(inout) :: x(n)
+  ! P and L are the dimensions of the room
+  real(kind=8), intent(in):: W, H, ch, cw
+  real(kind=8) :: Tz(A,2),Ts(A,2),Td(A,2),Tq(A,2),Pdist_t(A,7)
+  real(kind=8) :: ajuste_t(A,7), provaL, P, L, limbase(A,7)
+  real(kind=8) :: dist_t(1,7), dist, aux, Z(A,2), S(A,2), D(A,2)
+  real(kind=8) :: camada, camadadupla, v(7), so_t(2)
+  real(kind=8) :: pit2(4), pit1(4), coo(A,2), cod(A,2)
+  real(kind=8) :: raz
+  integer :: m1, m2, alfa, omega,  linha1
+  real(kind=8) :: d_v
+  integer :: caso_v
+
+  P = W - cw / 2.0D0
+  L = H - ch
+
+  raz = P/L
+  m1 = NINT(SQRT(A*raz))
+  m2 = NINT(SQRT(A/raz))
+  alfa = MIN (m1, m2) - 2
+  omega = MAX (m1, m2) + 2
+
+  if (alfa .lt. 1) then
+     alfa = 1
+  end if
+
+  if (omega .gt. A) then
+     omega = A
+  end if
+
+  !=========  Zig-zag pattern   =========
+  ! O_O_O
+  ! _O_O_O
+  ! O_O_O
+
+  Z(1,1) = A
+  Z(1,2) = 1
+
+  do i=alfa,omega
+     Z(i,1) = CEILING(A/real(i,8))
+     Z(i,2) = i
+  end do
+
+
+
+  ! Zig-zag sizes (Tz):
+  ! With more than 6 students, they will be distibuted in vertices
+  !of equilateral triangles. The array "Tz" stores the bases
+  !and the heights of them in function of the side "l".
+
+  !The first column of Tz has the sum of the bases of the fist line.
+  !The second one has the sum of the heights.
+
+  do i=alfa,omega
+     ! With n triangles, we have n - 1 bases and the sum of half a
+     ! base of the last one of the second line.
+     ! We also have n-1 heights
+     Tz(i,1) = Z(i,1) - 0.5
+     Tz(i,2) = (Z(i,2)-1.0)*SQRT(3.0)/2.0
+  end do
+
+  Tz(1,2) = 0.000001; !considering the width of a single line
+
+  ! Bases in P
+  do i=alfa,omega
+     Pdist_t(i,1) = P / Tz(i, 1)
+     provaL = Pdist_t(i,1) * Tz(i,2)
+     if (provaL .gt. L) then
+        ajuste_t(i,1) = provaL
+        Pdist_t(i,1) = L / Tz(i,2)
+     end if
+     limbase(i,1)= Pdist_t(i,1)*Tz(i,1) !***adicionei***
+  end do
+
+  ! Heights in P
+  do i=alfa,omega
+     Pdist_t(i,2) = P / Tz(i,2)
+     provaL = Pdist_t(i,2) * Tz(i,1)
+     if (provaL .gt. L) then
+        ajuste_t(i,2) = provaL
+        Pdist_t(i,2) = L / Tz(i,1)
+     end if
+     limbase(i,2)= Pdist_t(i,2)*Tz(i,1) !***adicionei***
+  end do
+
+
+
+  !=========  Sandwich pattern   =========
+  ! O_O_O
+  ! _O_O_
+  ! O_O_O
+
+  S(1,1) = A
+  S(1,2) = 1
+
+  do i=alfa,omega
+     S(i,1) = CEILING((A - CEILING(real(i)/2.0))/ real(i)) + 1.0
+     S(i, 2) = i
+  end do
+
+  ! Sandwich sizes:
+  ! First column has the sum of the bases of the first line
+  ! Second column has the sum of the heights
+
+  do i=alfa,omega
+     ! With n triangles, we have n-1 bases and the sum of half a base
+     !of the last one of the second line.
+     ! We also have n-1 heights
+     Ts(i,1) = S(i,1) - 1.0
+     Ts(i,2) = (S(i,2) - 1.0)*SQRT(3.0)/2.0
+  end do
+
+  Ts(1,2) = 0.000001 ! Considering the width of a single row
+
+  !Bases in P
+  do i=alfa,omega
+     Pdist_t(i,3) = P/Ts(i,1)
+     provaL = Pdist_t(i,3) * Ts(i,2)
+     if (provaL .gt. L) then
+        ajuste_t(i,3) = provaL
+        Pdist_t(i,3) = L / Ts(i,2)
+     end if
+     limbase(i,3)= Pdist_t(i,3)*Ts(i,1) !***adicionei***
+  end do
+
+  !Heights in P
+  do i=alfa,omega
+     Pdist_t(i,4) = P/Ts(i,2)
+     provaL = Pdist_t(i,4)*Ts(i,1)
+     if (provaL .gt. L) then
+        ajuste_t(i,4) = provaL
+        Pdist_t(i,4) = L/Ts(i,1)
+     end if
+     limbase(i,4)= Pdist_t(i,4)*Ts(i,1) !***adicionei***
+  end do
+
+
+  !=========  Double Layer pattern   =========
+  ! O_O_O
+  ! O_O_O
+  ! _O_O_
+  ! O_O_O
+
+  camadadupla = 0
+
+  D(1,1)=A
+  D(1,2)=1
+
+  do i=alfa,omega
+     D(i,1)= CEILING(real((A - 1 + CEILING(real(i)/2.0))/real(i)))
+     D(i,2)= i
+  end do
+
+  ! Double layer sizes:
+  ! First row has the sum of the bases of the first line
+  ! Second row has the sum of the heights
+
+  do i=alfa,omega
+     ! With n triangles, we have n-1 bases and the sum of half a base
+     !of the last triangle of the second line.
+     Td(i,1)= D(i,1)-1
+     ! Here we have to consider the double layer before we think about the
+     !triangles.
+     Td(i,2)= (S(i,2) - 2.0)*SQRT(3.0)/2.0 + 1.0
+  end do
+
+  Td(1,2) = 0.000001 ! Considerando a altura de uma Ãºnica fileira
+
+  !Bases in P
+  do i=alfa,omega
+     Pdist_t(i,5)= P/Td(i,1)
+     provaL = Pdist_t(i,5) * Td(i,2)
+     if (provaL .gt. L) then
+        ajuste_t(i,5) = provaL
+        Pdist_t(i,5) = L / Td(i,2)
+     end if
+     limbase(i,5)= Pdist_t(i,5)*Td(i,1) !***adicionei***
+  end do
+
+  !Heights in P
+  do i=alfa,omega
+     Pdist_t(i,6)= P / Td(i,2)
+     provaL = Pdist_t(i,6) * Td(i,1)
+     if (provaL .gt. L) then
+        ajuste_t(i,6) = provaL
+        Pdist_t(i,6) = L / Td(i,1)
+     end if
+     limbase(i,6)= Pdist_t(i,6)*Td(i,1) !***adicionei***
+  end do
+
+  !===============Square pattern=========================
+  !O_O_O
+  !O_O_O
+  !O_O_O
+
+  ! In this case, variable Z, from do zig-zag pattern will be used
+  ! to find the number of squares we need.
+
+
+  do i=alfa,omega
+     !With n squares, we have n-1 bases and heights.
+     Tq(i,1)= Z(i,1)-1
+     Tq(i,2)= Z(i,2)-1
+  end do
+
+  Tq(1,2)=0.000001;
+
+
+
+  do i=alfa,omega  !This pattern is symetric for 90ø rotation
+     Pdist_t(i,7)= P/Tq(i,1);
+     provaL=Pdist_t(i,7)*Tq(i,2);
+     if (provaL .gt. L) then
+        ajuste_t(i,7) = provaL
+        Pdist_t(i,7) = L / Tq(i,2)
+     end if
+     limbase(i,7)= Pdist_t(i,7)*Tq(i,1);
+  end do
+
+  ! ==================================
+
+  !indentifies the maximum distance and if the case demands to change P with L
+  !dist_t = MAXVAL(Pdist_t)
+  do i = 1,7
+     aux = Pdist_t(alfa,i)
+     lin(i) = 1
+     do j = alfa,omega
+        if(Pdist_t(j,i) > aux)then
+           aux = Pdist_t(j,i)
+           lin(i) = j
+        end if
+     end do
+     dist_t(1,i) = aux
+  end do
+
+  dist = MAXVAL(dist_t)
+
+  !caso = MAXLOC(dist_t)
+  do i = 1,7
+     if(dist_t(1,i) == dist) then
+        caso = i
+        EXIT
+     end if
+  end do
+
+  pit1(1) = ((dist_t(1,1)*P/limbase(lin(1),1))/2)**2
+  pit1(2) = ((dist_t(1,2)*L/limbase(lin(2),2))/2)**2
+  pit1(3) = ((dist_t(1,3)*P/limbase(lin(3),3))/2)**2
+  pit1(4) = ((dist_t(1,4)*L/limbase(lin(4),4))/2)**2
+
+  pit2(1) = dist_t(1,1)**2  * 0.75
+  pit2(2) = dist_t(1,2)**2  * 0.75
+  pit2(3) = dist_t(1,3)**2  * 0.75
+  pit2(4) = dist_t(1,4)**2  * 0.75
+
+  v(1)=sqrt(pit1(1)+pit2(1))
+  v(2)=sqrt(pit1(2)+pit2(2))
+  v(3)=sqrt(pit1(3)+pit2(3))
+  v(4)=sqrt(pit1(4)+pit2(4))
+  v(5)=dist_t(1,5)
+  v(6)=dist_t(1,6)
+  v(7)=dist_t(1,7)
+
+  !caso_v = MAXLOC(v)
+  !d_v = MAXVAL(v)
+  d_v = v(1)
+  caso_v = 1
+  do i = 2,7
+     if(v(i) > d_v)then
+        d_v = v(i)
+        caso_v = i
+     end if
+  end do
+
+  if (d_v .gt. dist) then
+     dist=dist_t(1,caso_v)
+     caso=caso_v
+  end if
+
+  !rounding the milimiters
+  !dist = FLOOR(dist*1000.0)/1000.0
+
+  !verifies if the bases were constructed over L or over P and change them if needed
+  cb=0
+  if (MOD(real(caso),2.0) == 0) then
+     aux = P
+     P = L
+     L = aux
+     cb=1
+  end if
+
+  !Verifies the double layer
+  if (caso == 5 .OR. caso == 6) then
+     camadadupla = 1
+  end if
+
+
+
+  !==========  Exporting the coordinates  ==========
+  camada = 1.0
+  coo(1,1) = 0.0
+  coo(1,2) = 0.0
+
+  if (caso .lt. 7) then !Coordinates routine is diferent for case 7
+
+     do i=2,A
+        coo(i,1)=coo(i-1,1)+dist;
+        coo(i,2)=coo(i-1,2);
+        if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
+           camada = camada + 1
+           coo(i,2) = coo(i,2) + (dist * SQRT(3.0)/2.0)
+           coo(i,1) = dist / 2.0 * (1.0 - MOD(camada,2.0))
+           if (camadadupla == 1) then
+              coo(i,2) = dist
+              coo(i,1) = 0
+              camadadupla = 0
+              camada = 1
+           end if
+        end if
+     end do
+
+     cod=coo
+
+     so_t=MAXVAL(cod, dim=1)
+
+
+     if ((P-so_t(1)) > (L-so_t(2))) then
+        if  (so_t(1) .ne. 0) then
+           do i=1,A
+              cod(i,1)= cod(i,1)*P/(so_t(1))
+           end do
+        end if
+     else
+        if  (so_t(2) .ne. 0) then
+           do i=1,A
+              cod(i,2)= cod(i,2)*L/(so_t(2))
+           end do
+        end if
+     end if
+
+  else   !Coordinates routine for case 7
+
+     do i=2,A
+        coo(i,1)=coo(i-1,1)+dist_t(1,7)
+        coo(i,2)=coo(i-1,2)
+        if (coo(i,1) > (limbase(lin(caso), caso))*1.0001) then
+           camada=camada+1
+           coo(i,2)=coo(i,2)+(dist_t(1,7))
+           coo(i,1)=0
+        end if
+     end do
+     cod=coo
+  end if
+
+  dist=v(caso)
+
+  cox=1
+  coy=2
+
+  if (cb==1) then
+     cox=2
+     coy=1
+  end if
+
+
+  do i=1,n-1
+     linha1=(i+1)/2
+     if (MOD(real(i),2.0) == 1) then
+        x(i)=cod(linha1,cox)
+     else
+        x(i)=cod(linha1,coy)
+     end if
+  end do
+
+  x(n) = dist
+
+  do i = 1, A
+     x(2 * i - 1) = x(2 * i - 1) + cw / 2.0D0
+     x(2 * i)     = x(2 * i)     + ch / 2.0D0
+  end do
+
+  return
+end subroutine generate_x
+
+!     ******************************************************************
+!     ******************************************************************
+
+subroutine perturbation_x(x, n, A, qnt)
+  implicit none
+  integer, intent(in) :: n, A
+  !x is the array with the points we will generate and give back
+  real(kind=8), intent(inout) :: x(n)
+  !Comentario Felipe
+  !Muito esquisito x e xp serem inout.  
+  !Acho que entra x e sai xp como sendo a solucao perturbada. 
+  real(kind=8), intent(in) :: qnt
+  real(kind=8) :: cop(A,2)
+  integer :: i, linha1, hv, ultimalinha
+
+  ! LOCAL SCALARS
+  real(kind=8) :: radius
+
+  !Comentario Felipe:
+  !Se o usuario der um aluno isso da erro.
+  ! A perturbacao nao deveria considerar cada um dos 6 casos?
+
+  ! Fix issue when the number of chairs is smaller than 2
+  if (n .lt. 5) return
+  
+  if (x(2) == x(4)) then
+     hv=2
+  else
+     hv=1
+  end if
+
+  radius = x(n) / 2.0D0
+
+  do i = 1, n-1, 2
+     cop((i + 1) / 2, 1) = x(i)
+     cop((i + 1) / 2, 2) = x(i+1)
+  end do
+
+  i = 1
+  do while (cop(1,hv) .eq.  cop(i,hv))
+
+     cop(i,hv) = (1 - MOD(REAL(i), 2.0)) * qnt * radius
+     i = i + 1
+     if (i .gt. A) exit
+
+  end do
+
+  linha1 = i - 1
+
+  i = 1
+
+  do while (cop(A,hv) .eq. cop(A - i + 1,hv))
+     cop(A - i + 1,hv) = cop(A,hv) - (1 - MOD(i,2)) * qnt * radius
+     i = i + 1
+     if (i .gt. A) exit
+  end do
+
+  ultimalinha = A - i
+
+  do i = linha1, ultimalinha
+     cop(i + 1,hv) = cop(i + 1,hv) + (qnt * 2.0D0 * radius) * ((-1) ** (i + 1))
+  end do
+
+  x(1:n - 1:2) = cop(:, 1)
+  x(2:n - 1:2) = cop(:, 2)
+  
+  ! do i = 1, n - 1
+  !    linha1 = (i + 1) / 2
+  !    if (MOD(real(i),2.0) == 1) then
+  !       x(i)=cop(linha1,1)
+  !    else
+  !       x(i)=cop(linha1,2)
+  !    end if
+  ! end do
+
+  ! Does not need to do this, of course
+  ! x(n) = x(n)
+
+end subroutine perturbation_x
